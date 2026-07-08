@@ -7,6 +7,7 @@
 <link rel="icon" href="favicon.ico" type="image/x-icon">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root{
     --ink:#1b2340; --ink-soft:#4a5378; --paper:#f6f5f2; --panel:#ffffff; --line:#e3e1da;
@@ -71,6 +72,22 @@
   .stat-card{background:#fcfcfb;border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
   .stat-card .label{font-size:12px;color:var(--ink-soft);margin-bottom:6px;}
   .stat-card .value{font-family:var(--mono);font-size:22px;font-weight:700;}
+  .dday{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;font-weight:700;font-family:var(--mono);}
+  .dday-normal{background:var(--accent-soft);color:var(--accent);}
+  .dday-soon{background:var(--late-soft);color:var(--late);}
+  .dday-over{background:var(--warn-soft);color:var(--warn);}
+  .urgent-banner{display:flex;align-items:center;gap:10px;background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13.5px;font-weight:700;}
+  .hw-file-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .hw-file-name{font-size:12.5px;color:var(--ink-soft);}
+  #detailModalOverlay{position:fixed;inset:0;background:rgba(27,35,64,0.55);display:none;align-items:flex-start;justify-content:center;z-index:1000;padding:40px 16px;overflow-y:auto;}
+  #detailModalOverlay.open{display:flex;}
+  #detailModalBox{background:var(--panel);border-radius:16px;max-width:760px;width:100%;padding:30px;position:relative;}
+  #detailModalBox .closeBtn{position:absolute;top:18px;right:20px;background:transparent;border:none;font-size:20px;cursor:pointer;color:var(--ink-soft);}
+  #detailModalBox h2{margin:0 0 2px;font-size:20px;}
+  #detailModalBox .sub{color:var(--ink-soft);font-size:13px;margin:0 0 18px;}
+  .chart-panel{background:#fcfcfb;border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px;}
+  .chart-panel h3{margin:0 0 12px;font-size:14.5px;}
+  .chart-panel canvas{max-height:220px;}
   footer{text-align:center;padding:20px;color:var(--ink-soft);font-size:12px;font-family:var(--mono);}
   #loginScreen{position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;z-index:999;}
   #loginBox{background:var(--panel);padding:40px;border-radius:16px;width:100%;max-width:360px;}
@@ -260,6 +277,7 @@
     <section id="stab-myhw" class="tab-panel">
       <div class="panel">
         <h2 style="margin:0 0 16px;">나의 숙제</h2>
+        <div id="myHwUrgentBanner"></div>
         <div id="myHwListWrap"></div>
       </div>
     </section>
@@ -281,6 +299,23 @@
 <footer>CHANCE MATH · 모든 데이터는 Supabase 클라우드 데이터베이스에 실시간으로 저장됩니다.</footer>
 </div>
 
+<div id="detailModalOverlay">
+  <div id="detailModalBox">
+    <button class="closeBtn" onclick="closeStudentDetail()">✕</button>
+    <h2 id="detailStuName"></h2>
+    <p class="sub" id="detailStuMeta"></p>
+    <div class="stat-row" id="detailStatRow"></div>
+    <div class="chart-panel">
+      <h3>출결 추이 (최근 기록순)</h3>
+      <canvas id="detailAttChart"></canvas>
+    </div>
+    <div class="chart-panel">
+      <h3>성적 추이</h3>
+      <canvas id="detailScoreChart"></canvas>
+    </div>
+  </div>
+</div>
+
 <script>
 const SUPABASE_URL = "https://vbfaagduyttzyfefstaf.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_mtCBDdGUfEqJqxU_8sJmbg_gjUrnKru";
@@ -296,6 +331,17 @@ let currentRole = null;
 let currentStudentId = null;
 let assignments = [];
 let submissions = [];
+const HW_BUCKET = 'homework-submissions';
+
+// 마감일 기준 D-day 정보 계산 (오늘/내일/모레는 임박으로 강조)
+function ddayInfo(dueDateStr){
+  if(!dueDateStr) return null;
+  const diff = Math.round((new Date(dueDateStr) - new Date(todayStr())) / 86400000);
+  if(diff < 0) return { text:'마감 지남', cls:'dday-over', urgent:true };
+  if(diff === 0) return { text:'오늘 마감', cls:'dday-soon', urgent:true };
+  if(diff <= 2) return { text:'D-'+diff, cls:'dday-soon', urgent:true };
+  return { text:'D-'+diff, cls:'dday-normal', urgent:false };
+}
 
 function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function fmtDate(str){ if(!str) return '-'; const [y,m,d]=str.split('-'); return `${y}.${m}.${d}`; }
@@ -472,7 +518,7 @@ function renderStudentTable(){
       <td>${escapeHtml(s.phone)||'-'}</td>
       <td>${rate===null?'기록 없음':rate+'%'}</td>
       <td>${avg===null?'기록 없음':`<span class="score-num ${avg>=80?'score-high':avg>=60?'score-mid':'score-low'}">${avg}점</span>`}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="editStudent('${s.id}')" style="margin-right:6px;">수정</button><button class="btn btn-warn btn-sm" onclick="deleteStudent('${s.id}')">삭제</button></td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openStudentDetail('${s.id}')" style="margin-right:6px;">상세보기</button><button class="btn btn-ghost btn-sm" onclick="editStudent('${s.id}')" style="margin-right:6px;">수정</button><button class="btn btn-warn btn-sm" onclick="deleteStudent('${s.id}')">삭제</button></td>
     </tr>`;
   });
   html += `</tbody></table>`;
@@ -486,6 +532,99 @@ async function deleteStudent(id){
   if(error){ alert('삭제 실패: '+error.message); return; }
   await refreshAll();
 }
+
+/* =========================================================
+   학생별 상세 리포트 (출결률·성적 추이 그래프)
+========================================================= */
+let detailAttChartInstance = null;
+let detailScoreChartInstance = null;
+
+function openStudentDetail(id){
+  const s = findStudent(id); if(!s) return;
+
+  document.getElementById('detailStuName').textContent = s.name;
+  document.getElementById('detailStuMeta').textContent =
+    `${s.grade || ''} · ${s.school || '학교 미입력'} · ${s.class_time || '반 미배정'}`;
+
+  const attList = attendance.filter(a=>a.studentId===id).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const scoreList = scores.filter(sc=>sc.studentId===id).slice().sort((a,b)=>a.date.localeCompare(b.date));
+
+  const total = attList.length;
+  const presentCount = attList.filter(a=>a.status==='출석').length;
+  const lateCount = attList.filter(a=>a.status==='지각').length;
+  const absentCount = attList.filter(a=>a.status==='결석').length;
+  const rate = total ? Math.round(presentCount/total*100) : null;
+  const avg = scoreList.length ? Math.round(scoreList.reduce((a,b)=>a+Number(b.score),0)/scoreList.length) : null;
+
+  document.getElementById('detailStatRow').innerHTML = `
+    <div class="stat-card"><div class="label">전체 출석률</div><div class="value">${rate===null?'-':rate+'%'}</div></div>
+    <div class="stat-card"><div class="label">출석 / 지각 / 결석</div><div class="value" style="font-size:16px;">${presentCount} / ${lateCount} / ${absentCount}</div></div>
+    <div class="stat-card"><div class="label">평균 점수</div><div class="value">${avg===null?'-':avg+'점'}</div></div>
+    <div class="stat-card"><div class="label">응시 횟수</div><div class="value">${scoreList.length}회</div></div>`;
+
+  // 출결 차트: 상태를 점수화(출석=1, 지각=0.5, 결석=0)해서 추이를 보여줌
+  const attCtx = document.getElementById('detailAttChart').getContext('2d');
+  if(detailAttChartInstance) detailAttChartInstance.destroy();
+  if(attList.length===0){
+    detailAttChartInstance = null;
+    attCtx.clearRect(0,0,attCtx.canvas.width, attCtx.canvas.height);
+  } else {
+    detailAttChartInstance = new Chart(attCtx, {
+      type: 'bar',
+      data: {
+        labels: attList.map(a=>fmtDate(a.date)),
+        datasets: [{
+          label: '출결 상태',
+          data: attList.map(a=> a.status==='출석' ? 1 : a.status==='지각' ? 0.5 : 0),
+          backgroundColor: attList.map(a=> a.status==='출석' ? '#2f5d50' : a.status==='지각' ? '#b8862f' : '#b3452e')
+        }]
+      },
+      options: {
+        responsive:true,
+        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: (ctx)=> attList[ctx.dataIndex].status } } },
+        scales:{ y:{ min:0, max:1, ticks:{ stepSize:0.5, callback:(v)=> v===1?'출석':v===0.5?'지각':'결석' } } }
+      }
+    });
+  }
+
+  // 성적 추이 차트
+  const scoreCtx = document.getElementById('detailScoreChart').getContext('2d');
+  if(detailScoreChartInstance) detailScoreChartInstance.destroy();
+  if(scoreList.length===0){
+    detailScoreChartInstance = null;
+    scoreCtx.clearRect(0,0,scoreCtx.canvas.width, scoreCtx.canvas.height);
+  } else {
+    detailScoreChartInstance = new Chart(scoreCtx, {
+      type: 'line',
+      data: {
+        labels: scoreList.map(sc=>fmtDate(sc.date)),
+        datasets: [{
+          label: '점수',
+          data: scoreList.map(sc=>Number(sc.score)),
+          borderColor: '#2f5d50',
+          backgroundColor: 'rgba(47,93,80,0.12)',
+          tension: 0.25,
+          fill: true,
+          pointRadius: 4
+        }]
+      },
+      options: {
+        responsive:true,
+        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:(ctx)=> scoreList[ctx.dataIndex].examName+' · '+ctx.parsed.y+'점' } } },
+        scales:{ y:{ min:0, max:100 } }
+      }
+    });
+  }
+
+  document.getElementById('detailModalOverlay').classList.add('open');
+}
+
+function closeStudentDetail(){
+  document.getElementById('detailModalOverlay').classList.remove('open');
+}
+document.getElementById('detailModalOverlay').addEventListener('click', (e)=>{
+  if(e.target.id === 'detailModalOverlay') closeStudentDetail();
+});
 
 function renderAttendanceTab(){
   const pick = document.getElementById('attStudentPick');
@@ -704,6 +843,7 @@ function renderHwList(){
             ${hw.class_time ? '반: '+escapeHtml(hw.class_time) : (targets[0] ? '개별: '+escapeHtml(targets[0].name) : '')}
             ${hw.due_date ? ' · 마감 '+fmtDate(hw.due_date) : ''}
           </span>
+          ${(()=>{ const dd = ddayInfo(hw.due_date); return dd && doneCount<targets.length ? ` <span class="dday ${dd.cls}">${dd.text}</span>` : ''; })()}
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span class="badge ${doneCount===targets.length && targets.length>0 ? 'badge-present':'badge-late'}">${doneCount}/${targets.length} 제출</span>
@@ -711,19 +851,27 @@ function renderHwList(){
         </div>
       </div>
       ${hw.description ? `<p style="color:var(--ink-soft);font-size:13.5px;margin:8px 0 12px;">${escapeHtml(hw.description)}</p>` : ''}
-      <table><thead><tr><th>학생</th><th>제출 여부</th><th>제출 내용</th></tr></thead><tbody>
+      <table><thead><tr><th>학생</th><th>제출 여부</th><th>제출 내용</th><th>첨부파일</th></tr></thead><tbody>
       ${targets.map(s=>{
         const sub = subForThis.find(x=>x.student_id===s.id);
         return `<tr>
           <td>${escapeHtml(s.name)}</td>
           <td>${sub && sub.submitted_at ? `<span class="badge badge-present">제출완료</span>` : `<span class="badge badge-absent">미제출</span>`}</td>
           <td>${sub && sub.content ? escapeHtml(sub.content) : '-'}</td>
+          <td>${sub && sub.file_path ? `<button class="btn btn-ghost btn-sm" onclick="viewSubmissionFile('${sub.file_path}')">📎 ${escapeHtml(sub.file_name||'파일보기')}</button>` : '-'}</td>
         </tr>`;
       }).join('')}
       </tbody></table>
     </div>`;
   });
   wrap.innerHTML = html;
+}
+
+// 학생이 제출한 첨부파일을 임시 서명 URL로 열람 (비공개 버킷)
+async function viewSubmissionFile(path){
+  const { data, error } = await sb.storage.from(HW_BUCKET).createSignedUrl(path, 3600);
+  if(error){ alert('파일을 불러오지 못했습니다: '+error.message); return; }
+  window.open(data.signedUrl, '_blank');
 }
 
 /* =========================================================
@@ -753,19 +901,39 @@ async function loadMyAssignments(){
 
 function renderMyHw(){
   const wrap = document.getElementById('myHwListWrap');
+  const bannerEl = document.getElementById('myHwUrgentBanner');
+
+  // 마감 임박(오늘~모레) + 미제출 숙제 개수 → 상단 배너
+  const urgentCount = assignments.filter(hw=>{
+    const sub = submissions.find(s=>s.assignment_id===hw.id);
+    const dd = ddayInfo(hw.due_date);
+    return dd && dd.urgent && !(sub && sub.submitted_at);
+  }).length;
+  bannerEl.innerHTML = urgentCount>0
+    ? `<div class="urgent-banner">⏰ 마감이 임박한 숙제가 ${urgentCount}건 있습니다. 서둘러 제출해 주세요!</div>`
+    : '';
+
   if(assignments.length===0){ wrap.innerHTML = `<div class="empty">아직 배정된 숙제가 없습니다.</div>`; return; }
   let html = '';
   assignments.forEach(hw=>{
     const sub = submissions.find(s=>s.assignment_id===hw.id);
     const submitted = sub && sub.submitted_at;
+    const dd = ddayInfo(hw.due_date);
     html += `<div style="border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
         <strong>${escapeHtml(hw.title)}</strong>
         <span class="badge ${submitted ? 'badge-present':'badge-late'}">${submitted ? '제출완료' : '미제출'}</span>
       </div>
-      <p style="color:var(--ink-soft);font-size:13px;margin:6px 0;">${hw.due_date ? '마감 '+fmtDate(hw.due_date) : '마감일 없음'}</p>
+      <p style="color:var(--ink-soft);font-size:13px;margin:6px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span>${hw.due_date ? '마감 '+fmtDate(hw.due_date) : '마감일 없음'}</span>
+        ${dd && !submitted ? `<span class="dday ${dd.cls}">${dd.text}</span>` : ''}
+      </p>
       ${hw.description ? `<p style="font-size:14px;margin:8px 0 12px;">${escapeHtml(hw.description)}</p>` : ''}
       <textarea id="hwSubmit_${hw.id}" rows="2" placeholder="숙제 완료 내용이나 질문을 적어주세요." style="margin-bottom:8px;">${sub && sub.content ? escapeHtml(sub.content) : ''}</textarea>
+      <div class="hw-file-row">
+        <input type="file" id="hwFile_${hw.id}">
+        ${sub && sub.file_name ? `<span class="hw-file-name">현재 첨부: 📎 ${escapeHtml(sub.file_name)}</span>` : ''}
+      </div>
       <button class="btn btn-primary btn-sm" onclick="submitMyHomework('${hw.id}')">${submitted ? '다시 제출하기' : '제출하기'}</button>
       ${sub && sub.teacher_feedback ? `<div style="margin-top:10px;padding:10px;background:var(--accent-soft);border-radius:8px;font-size:13.5px;color:var(--accent);"><strong>선생님 피드백:</strong> ${escapeHtml(sub.teacher_feedback)}</div>` : ''}
     </div>`;
@@ -775,9 +943,27 @@ function renderMyHw(){
 
 async function submitMyHomework(assignmentId){
   const content = document.getElementById('hwSubmit_'+assignmentId).value.trim();
+  const fileInput = document.getElementById('hwFile_'+assignmentId);
+  const file = fileInput && fileInput.files[0];
+
+  // 기존에 첨부된 파일 정보 유지 (새 파일을 안 고르면 그대로)
+  const existing = submissions.find(s=>s.assignment_id===assignmentId);
+  let filePath = existing ? existing.file_path : null;
+  let fileName = existing ? existing.file_name : null;
+
+  if(file){
+    if(file.size > 20 * 1024 * 1024){ alert('파일 용량은 20MB 이하만 업로드할 수 있습니다.'); return; }
+    const safeName = file.name.replace(/[^\w.\-가-힣]/g, '_');
+    const path = `${currentStudentId}/${assignmentId}/${Date.now()}_${safeName}`;
+    const { error: upErr } = await sb.storage.from(HW_BUCKET).upload(path, file, { upsert: true });
+    if(upErr){ alert('파일 업로드 실패: '+upErr.message); return; }
+    filePath = path; fileName = file.name;
+  }
+
   const { error } = await sb.from('submissions').upsert({
     assignment_id: assignmentId, student_id: currentStudentId,
-    content, submitted_at: new Date().toISOString()
+    content, file_path: filePath, file_name: fileName,
+    submitted_at: new Date().toISOString()
   }, { onConflict: 'assignment_id,student_id' });
   if(error){ alert('제출 실패: '+error.message); return; }
   alert('제출되었습니다.');
