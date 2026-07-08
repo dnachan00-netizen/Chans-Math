@@ -22,6 +22,8 @@
   header{background:var(--ink);color:#f6f5f2;padding:22px 32px;display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;border-bottom:4px solid var(--accent);}
   header .brand{display:flex;align-items:baseline;gap:12px;}
   header .brand .mark{font-family:var(--mono);font-size:13px;letter-spacing:2px;color:var(--accent);background:rgba(47,93,80,0.25);padding:4px 8px;border-radius:4px;}
+  .logo-chip{background:#fff;border-radius:8px;padding:6px 12px;display:inline-flex;align-items:center;line-height:0;}
+  .logo-chip .brand-logo{height:26px;width:auto;display:block;}
   header h1{font-size:22px;margin:0;font-weight:700;letter-spacing:-0.3px;}
   header .right{display:flex;align-items:center;gap:16px;}
   header .today{font-family:var(--mono);font-size:13px;color:#c9cbd9;}
@@ -147,7 +149,7 @@
 <div id="appRoot">
 <header>
   <div class="brand">
-    <span class="mark">CHANCE MATH</span>
+    <span class="logo-chip"><img src="logo.png" alt="찬스수학" class="brand-logo"></span>
     <h1>찬스수학 통합 학생 관리 프로그램</h1>
   </div>
   <div class="right">
