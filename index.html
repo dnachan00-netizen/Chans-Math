@@ -429,7 +429,7 @@ async function enterApp(session){
   currentStudentId = profile.student_id;
 
   if(currentRole === 'staff'){
-    document.getElementById('staffView').style.display = 'block';
+    document.getElementById('staffView').style.display = 'flex';
     document.getElementById('studentView').style.display = 'none';
     await refreshAll();
     await loadAssignmentsAndSubmissions();
