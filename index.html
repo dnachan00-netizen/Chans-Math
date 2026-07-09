@@ -6,6 +6,11 @@
 <title>찬스수학 통합 학생 관리 프로그램</title>
 <link rel="icon" href="favicon.ico" type="image/x-icon">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1b2340">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="찬스수학">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
@@ -1626,6 +1631,13 @@ function renderMyInfo(){
     });
     scoreWrap.innerHTML = html + `</tbody></table>`;
   }
+}
+
+// 홈 화면에 앱처럼 설치할 수 있도록 서비스워커 등록 (지원 안 하는 브라우저는 조용히 무시)
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
 }
 </script>
 </body>
