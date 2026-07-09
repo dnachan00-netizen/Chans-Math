@@ -97,6 +97,11 @@
     .panel{padding:16px;}
     .grid-form{grid-template-columns:1fr;}
     .kpi-card .kpi-value{font-size:21px;}
+    .kpi-bar{grid-template-columns:1fr 1fr !important;gap:8px;}
+    .kpi-card{padding:12px 12px;}
+    .kpi-card .kpi-label{font-size:11px;gap:4px;}
+    .kpi-card .kpi-value{font-size:19px;}
+    .kpi-card .kpi-sub{font-size:10px;}
     #detailModalBox{padding:18px;max-width:100%;}
     #detailModalOverlay{padding:12px;}
     .home-class-grid{grid-template-columns:repeat(auto-fill,minmax(96px,1fr));}
@@ -1518,12 +1523,12 @@ async function renderKpiBar(){
 
   bar.innerHTML = `
     <div class="kpi-card ${group ? (uncheckedToday.length>0 ? 'warn':'accent') : ''} clickable" onclick="document.querySelector('.tab-btn[data-tab=home]').click()">
-      <div class="kpi-label">📋 오늘 출석 체크</div>
+      <div class="kpi-label">📋 오늘 출석</div>
       <div class="kpi-value">${group ? uncheckedToday.length : '–'}<span class="unit">${group ? '명 남음' : ''}</span></div>
       <div class="kpi-sub">${group ? `오늘(${group}) 수업 대상 ${scheduledToday.length}명 중` : '오늘은 수업 없는 요일'}</div>
     </div>
     <div class="kpi-card ${group && logWrittenCount<scheduledToday.length ? '' : 'accent'} clickable" onclick="document.querySelector('.tab-btn[data-tab=home]').click()">
-      <div class="kpi-label">📝 오늘 수업일지 작성</div>
+      <div class="kpi-label">📝 수업일지 작성</div>
       <div class="kpi-value">${group ? logWrittenCount : '–'}<span class="unit">${group ? `/${scheduledToday.length}명` : ''}</span></div>
       <div class="kpi-sub">${group ? '작성 완료 기준' : '오늘은 수업 없는 요일'}</div>
     </div>
@@ -1533,7 +1538,7 @@ async function renderKpiBar(){
       <div class="kpi-sub">오늘~2일 이내, 미제출 기준</div>
     </div>
     <div class="kpi-card ${followUpCount>0?'warn':''} clickable" onclick="document.querySelector('.tab-btn[data-tab=counseling]').click()">
-      <div class="kpi-label">🗒️ 상담 후속조치 필요</div>
+      <div class="kpi-label">🗒️ 상담 후속조치</div>
       <div class="kpi-value">${followUpCount||0}<span class="unit">건</span></div>
       <div class="kpi-sub">체크되어 있는 상담 기준</div>
     </div>`;
