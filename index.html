@@ -458,6 +458,10 @@
       </div>
       <div class="grid-form">
         <div style="grid-column:1/-1;"><label>내용</label><textarea id="hwDesc" rows="3" placeholder="숙제 상세 내용을 적어주세요."></textarea></div>
+        <div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="hwSendKakao" checked style="width:auto;">
+          <label style="margin:0;" for="hwSendKakao">마감 하루 전 카카오 알림톡 보내기</label>
+        </div>
       </div>
       <button class="btn btn-primary" id="addHwBtn">숙제 등록하기</button>
     </div>
@@ -1138,6 +1142,9 @@ async function renderHomeStudentList(){
       <div class="hs-quick-hw" id="hsQuickHw_${s.id}" style="display:none;">
         <input type="text" id="hsQuickHwInput_${s.id}" placeholder="오늘 낸 과제를 입력하세요">
         <input type="date" id="hsQuickHwDate_${s.id}" style="max-width:150px;">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-soft);white-space:nowrap;">
+          <input type="checkbox" id="hsQuickHwKakao_${s.id}" checked style="width:auto;">알림톡
+        </label>
         <button class="btn btn-primary btn-sm" onclick="saveQuickHomework('${s.id}')">저장</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleQuickHomework('${s.id}')">취소</button>
       </div>
@@ -1174,11 +1181,15 @@ async function toggleQuickHomework(studentId){
   input.disabled = false;
   input.value = (data && data.today_homework) || '';
 
-  // 이미 연결된 정식 숙제가 있으면 그 마감일을 불러오고, 없으면 기본값(3일 뒤)
+  // 이미 연결된 정식 숙제가 있으면 그 마감일/알림톡 설정을 불러오고, 없으면 기본값(3일 뒤, 알림톡 켜짐)
   let dueDate = null;
+  const kakaoCheckbox = document.getElementById('hsQuickHwKakao_'+studentId);
   if(data && data.homework_assignment_id){
-    const { data: hw } = await sb.from('assignments').select('due_date').eq('id', data.homework_assignment_id).maybeSingle();
+    const { data: hw } = await sb.from('assignments').select('due_date, send_kakao_reminder').eq('id', data.homework_assignment_id).maybeSingle();
     dueDate = hw ? hw.due_date : null;
+    if(kakaoCheckbox) kakaoCheckbox.checked = hw ? hw.send_kakao_reminder !== false : true;
+  } else {
+    if(kakaoCheckbox) kakaoCheckbox.checked = true;
   }
   if(!dueDate){
     const d = new Date(); d.setDate(d.getDate()+3);
@@ -1196,8 +1207,10 @@ async function saveQuickHomework(studentId){
   const s = findStudent(studentId); if(!s) return;
   const input = document.getElementById('hsQuickHwInput_'+studentId);
   const dateInput = document.getElementById('hsQuickHwDate_'+studentId);
+  const kakaoCheckbox = document.getElementById('hsQuickHwKakao_'+studentId);
   const text = input.value.trim();
   const dueDate = dateInput.value || null;
+  const sendKakao = kakaoCheckbox ? kakaoCheckbox.checked : true;
 
   const { data: existingLog } = await sb.from('class_logs').select('*')
     .eq('student_id', studentId).eq('note_date', todayStr()).maybeSingle();
@@ -1213,14 +1226,14 @@ async function saveQuickHomework(studentId){
     }
   } else if(assignmentId){
     // 기존 숙제 수정
-    const { error } = await sb.from('assignments').update({ title: text, due_date: dueDate }).eq('id', assignmentId);
+    const { error } = await sb.from('assignments').update({ title: text, due_date: dueDate, send_kakao_reminder: sendKakao }).eq('id', assignmentId);
     if(error){ alert('숙제 수정 실패: '+error.message); return; }
     const a = assignments.find(x=>x.id===assignmentId);
-    if(a){ a.title = text; a.due_date = dueDate; }
+    if(a){ a.title = text; a.due_date = dueDate; a.send_kakao_reminder = sendKakao; }
   } else {
     // 새 숙제 생성 (이 학생 개별 대상)
     const { data: inserted, error } = await sb.from('assignments')
-      .insert({ title: text, due_date: dueDate, student_id: studentId, class_time: null, description: '' })
+      .insert({ title: text, due_date: dueDate, student_id: studentId, class_time: null, description: '', send_kakao_reminder: sendKakao })
       .select().single();
     if(error){ alert('숙제 등록 실패: '+error.message); return; }
     assignmentId = inserted.id;
@@ -1675,15 +1688,18 @@ document.getElementById('addHwBtn').addEventListener('click', async ()=>{
   const classTime = document.getElementById('hwClassTime').value;
   const studentId = document.getElementById('hwStudent').value;
   const description = document.getElementById('hwDesc').value.trim();
+  const sendKakao = document.getElementById('hwSendKakao').checked;
   if(!title){ alert('숙제 제목을 입력해 주세요.'); return; }
   if(!classTime && !studentId){ alert('대상 반 또는 대상 학생 중 하나는 선택해 주세요.'); return; }
   const { error } = await sb.from('assignments').insert({
     title, description, due_date: dueDate || null,
-    class_time: classTime || null, student_id: studentId || null
+    class_time: classTime || null, student_id: studentId || null,
+    send_kakao_reminder: sendKakao
   });
   if(error){ alert('등록 실패: '+error.message); return; }
   document.getElementById('hwTitle').value=''; document.getElementById('hwDesc').value='';
   document.getElementById('hwClassTime').value=''; document.getElementById('hwStudent').value='';
+  document.getElementById('hwSendKakao').checked = true;
   await loadAssignmentsAndSubmissions();
   renderHwList();
 });
@@ -1720,6 +1736,7 @@ function renderHwList(){
             ${hw.due_date ? ' · 마감 '+fmtDate(hw.due_date) : ''}
           </span>
           ${(()=>{ const dd = ddayInfo(hw.due_date); return dd && doneCount<targets.length ? ` <span class="dday ${dd.cls}">${dd.text}</span>` : ''; })()}
+          <span style="color:var(--ink-soft);font-size:12px;margin-left:6px;" title="마감 하루 전 카카오 알림톡 발송 여부">${hw.send_kakao_reminder===false ? '🔕 알림톡 끔' : '🔔 알림톡 켬'}</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span class="badge ${doneCount===targets.length && targets.length>0 ? 'badge-present':'badge-late'}">${doneCount}/${targets.length} 제출</span>
