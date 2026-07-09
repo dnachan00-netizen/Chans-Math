@@ -1087,25 +1087,30 @@ async function renderHomeStudentList(){
   wrap.innerHTML = html;
 }
 
-function toggleQuickHomework(studentId){
+async function toggleQuickHomework(studentId){
   const box = document.getElementById('hsQuickHw_'+studentId);
   const logBox = document.getElementById('hsQuickLog_'+studentId);
   if(logBox) logBox.style.display = 'none';
   const isOpen = box.style.display !== 'none';
-  box.style.display = isOpen ? 'none' : 'flex';
-  if(!isOpen){
-    const input = document.getElementById('hsQuickHwInput_'+studentId);
-    input.focus();
-    input.onkeydown = (e)=>{ if(e.key==='Enter') saveQuickHomework(studentId); };
-  }
+  if(isOpen){ box.style.display = 'none'; return; }
+  box.style.display = 'flex';
+  const input = document.getElementById('hsQuickHwInput_'+studentId);
+  input.value = '불러오는 중...';
+  input.disabled = true;
+  const { data } = await sb.from('class_logs').select('today_homework')
+    .eq('student_id', studentId).eq('note_date', todayStr()).maybeSingle();
+  input.disabled = false;
+  input.value = (data && data.today_homework) || '';
+  input.focus();
+  input.select();
+  input.onkeydown = (e)=>{ if(e.key==='Enter') saveQuickHomework(studentId); };
 }
 
-// 오늘 과제만 빠르게 입력 → 수업일지의 '오늘 과제' 칸에 저장 (기존 수업내용/특이사항은 유지)
+// 오늘 과제만 빠르게 입력/수정 → 수업일지의 '오늘 과제' 칸에 저장 (기존 수업내용/특이사항은 유지)
 async function saveQuickHomework(studentId){
   const s = findStudent(studentId); if(!s) return;
   const input = document.getElementById('hsQuickHwInput_'+studentId);
   const text = input.value.trim();
-  if(!text) return;
 
   const { data: existing } = await sb.from('class_logs').select('*')
     .eq('student_id', studentId).eq('note_date', todayStr()).maybeSingle();
@@ -1122,7 +1127,7 @@ async function saveQuickHomework(studentId){
   toggleQuickHomework(studentId);
   document.getElementById('hsPreview_'+studentId).innerHTML = `
     <span class="hs-log-item"><strong>오늘 수업</strong> ${existing && existing.lesson_content ? escapeHtml(existing.lesson_content) : '<span class="hs-log-empty">아직 기록 없음</span>'}</span>
-    <span class="hs-log-item"><strong>오늘 과제</strong> ${escapeHtml(text)}</span>`;
+    <span class="hs-log-item"><strong>오늘 과제</strong> ${text ? escapeHtml(text) : '<span class="hs-log-empty">아직 없음</span>'}</span>`;
 }
 
 // 홈 화면에서 출결을 바로 체크 (다시 누르면 취소)
