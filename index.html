@@ -1048,8 +1048,8 @@ async function renderHomeStudentList(){
         <button class="att-quick-btn ${attStatus==='결석'?'active absent':''}" onclick="quickSetAttendance('${s.id}','결석')">결석</button>
         <span class="hs-actions">
           <button class="btn btn-ghost btn-sm" onclick="toggleQuickHomework('${s.id}')">숙제</button>
-          <button class="btn btn-ghost btn-sm" onclick="goToCounselingFor('${s.id}')">상담일지</button>
           <button class="btn btn-ghost btn-sm" onclick="toggleClassLogInline('${s.id}')">수업일지</button>
+          <button class="btn btn-ghost btn-sm" onclick="goToCounselingFor('${s.id}')">상담일지</button>
         </span>
       </div>
       <div class="hs-log-preview" id="hsPreview_${s.id}">
