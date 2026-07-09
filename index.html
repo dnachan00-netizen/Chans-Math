@@ -141,10 +141,18 @@
   .home-class-btn .hc-time{font-weight:700;font-size:14.5px;}
   .home-class-btn .hc-count{font-family:var(--mono);font-size:12px;color:var(--ink-soft);}
   .home-student-list{display:flex;flex-direction:column;gap:8px;}
-  .home-student-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;}
-  .home-student-row .hs-name{font-weight:700;min-width:70px;}
+  .home-student-row{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;}
+  .home-student-row .hs-row-top{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+  .home-student-row .hs-name{font-weight:700;min-width:70px;cursor:pointer;}
+  .home-student-row .hs-name:hover{color:var(--accent);text-decoration:underline;}
   .home-student-row .hs-meta{color:var(--ink-soft);font-size:12.5px;flex:1;}
   .home-student-row .hs-actions{display:flex;gap:6px;}
+  .hs-log-preview{display:flex;flex-direction:column;gap:3px;background:#fcfcfb;border:1px solid var(--line);border-radius:8px;padding:8px 10px;}
+  .hs-log-item{font-size:12.5px;color:var(--ink);}
+  .hs-log-item strong{color:var(--ink-soft);font-weight:700;margin-right:6px;font-family:var(--mono);font-size:11px;}
+  .hs-log-empty{color:var(--ink-soft);font-style:italic;}
+  .hs-quick-hw{display:flex;gap:8px;align-items:center;}
+  .hs-quick-hw input{flex:1;}
   .cl-prev-rate{background:#fcfcfb;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13.5px;color:var(--ink-soft);}
   footer{text-align:center;padding:20px;color:var(--ink-soft);font-size:12px;font-family:var(--mono);}
   #loginScreen{position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;z-index:999;}
@@ -923,35 +931,96 @@ function toggleHomeAllClasses(){
   renderHomeClassButtons();
 }
 
-function selectHomeClass(classTime){
+async function selectHomeClass(classTime){
   homeSelectedClass = classTime;
   renderHomeClassButtons();
-  renderHomeStudentList();
+  await renderHomeStudentList();
   document.getElementById('homeClassLogPanel').style.display = 'none';
 }
 
-function renderHomeStudentList(){
+// 오늘 날짜 기준으로 이 학생들의 수업일지(수업내용/오늘과제)를 student_id 기준 맵으로 반환
+async function loadTodayLogsFor(studentIds){
+  if(studentIds.length===0) return {};
+  const { data, error } = await sb.from('class_logs').select('*')
+    .eq('note_date', todayStr()).in('student_id', studentIds);
+  if(error || !data) return {};
+  const map = {};
+  data.forEach(row=>{ map[row.student_id] = row; });
+  return map;
+}
+
+async function renderHomeStudentList(){
   const classTime = homeSelectedClass;
   const list = classTime ? students.filter(s=>s.class_time===classTime) : students.filter(s=>!s.class_time);
   const panel = document.getElementById('homeClassStudentsPanel');
   const wrap = document.getElementById('homeClassStudents');
   panel.style.display = 'block';
   if(list.length===0){ wrap.innerHTML = `<div class="empty">이 반에 등록된 학생이 없습니다.</div>`; return; }
+
+  const todayLogs = await loadTodayLogsFor(list.map(s=>s.id));
+
   let html = `<h2 style="margin:0 0 16px;">${classTime || '반 미배정'} <span style="color:var(--ink-soft);font-weight:400;font-size:14px;">(${list.length}명)</span></h2><div class="home-student-list">`;
   list.forEach(s=>{
-    html += `<div class="home-student-row">
-      <span class="hs-name">${escapeHtml(s.name)}</span>
-      <span class="hs-meta">${escapeHtml(s.grade)||''} · ${escapeHtml(s.school)||'학교 미입력'}</span>
-      <span class="hs-actions">
-        <button class="btn btn-ghost btn-sm" onclick="openStudentDetail('${s.id}')">상세보기</button>
-        <button class="btn btn-ghost btn-sm" onclick="goToHomeworkFor('${s.id}')">숙제 내주기</button>
-        <button class="btn btn-ghost btn-sm" onclick="goToCounselingFor('${s.id}')">상담 일지</button>
-        <button class="btn btn-ghost btn-sm" onclick="openClassLogPanel('${s.id}')">수업일지</button>
-      </span>
+    const log = todayLogs[s.id];
+    html += `<div class="home-student-row" id="hsRow_${s.id}">
+      <div class="hs-row-top">
+        <span class="hs-name" onclick="openStudentDetail('${s.id}')" title="상세보기">${escapeHtml(s.name)}</span>
+        <span class="hs-meta">${escapeHtml(s.grade)||''} · ${escapeHtml(s.school)||'학교 미입력'}</span>
+        <span class="hs-actions">
+          <button class="btn btn-ghost btn-sm" onclick="toggleQuickHomework('${s.id}')">숙제 내주기</button>
+          <button class="btn btn-ghost btn-sm" onclick="goToCounselingFor('${s.id}')">상담 일지</button>
+          <button class="btn btn-ghost btn-sm" onclick="openClassLogPanel('${s.id}')">수업일지</button>
+        </span>
+      </div>
+      <div class="hs-log-preview" id="hsPreview_${s.id}">
+        <span class="hs-log-item"><strong>오늘 수업</strong> ${log && log.lesson_content ? escapeHtml(log.lesson_content) : '<span class="hs-log-empty">아직 기록 없음</span>'}</span>
+        <span class="hs-log-item"><strong>오늘 과제</strong> ${log && log.today_homework ? escapeHtml(log.today_homework) : '<span class="hs-log-empty">아직 없음</span>'}</span>
+      </div>
+      <div class="hs-quick-hw" id="hsQuickHw_${s.id}" style="display:none;">
+        <input type="text" id="hsQuickHwInput_${s.id}" placeholder="오늘 낸 과제를 입력하세요">
+        <button class="btn btn-primary btn-sm" onclick="saveQuickHomework('${s.id}')">저장</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleQuickHomework('${s.id}')">취소</button>
+      </div>
     </div>`;
   });
   html += `</div>`;
   wrap.innerHTML = html;
+}
+
+function toggleQuickHomework(studentId){
+  const box = document.getElementById('hsQuickHw_'+studentId);
+  const isOpen = box.style.display !== 'none';
+  box.style.display = isOpen ? 'none' : 'flex';
+  if(!isOpen){
+    const input = document.getElementById('hsQuickHwInput_'+studentId);
+    input.focus();
+    input.onkeydown = (e)=>{ if(e.key==='Enter') saveQuickHomework(studentId); };
+  }
+}
+
+// 오늘 과제만 빠르게 입력 → 수업일지의 '오늘 과제' 칸에 저장 (기존 수업내용/특이사항은 유지)
+async function saveQuickHomework(studentId){
+  const s = findStudent(studentId); if(!s) return;
+  const input = document.getElementById('hsQuickHwInput_'+studentId);
+  const text = input.value.trim();
+  if(!text) return;
+
+  const { data: existing } = await sb.from('class_logs').select('*')
+    .eq('student_id', studentId).eq('note_date', todayStr()).maybeSingle();
+
+  const { error } = await sb.from('class_logs').upsert({
+    student_id: studentId, class_time: s.class_time || null, note_date: todayStr(),
+    lesson_content: existing ? existing.lesson_content : '',
+    today_homework: text,
+    prev_homework_rate: computePrevHomeworkRate(studentId),
+    special_notes: existing ? existing.special_notes : ''
+  }, { onConflict: 'student_id,note_date' });
+  if(error){ alert('저장 실패: '+error.message); return; }
+
+  toggleQuickHomework(studentId);
+  document.getElementById('hsPreview_'+studentId).innerHTML = `
+    <span class="hs-log-item"><strong>오늘 수업</strong> ${existing && existing.lesson_content ? escapeHtml(existing.lesson_content) : '<span class="hs-log-empty">아직 기록 없음</span>'}</span>
+    <span class="hs-log-item"><strong>오늘 과제</strong> ${escapeHtml(text)}</span>`;
 }
 
 /* =========================================================
@@ -1016,6 +1085,15 @@ document.getElementById('addClBtn').addEventListener('click', async ()=>{
   }, { onConflict: 'student_id,note_date' });
   if(error){ alert('저장 실패: '+error.message); return; }
   document.getElementById('clSyncStatus').textContent = '저장됨 · 잠시 후 노션에도 반영됩니다.';
+  // 오늘 날짜로 저장했다면 목록의 미리보기도 즉시 갱신
+  if(date === todayStr()){
+    const preview = document.getElementById('hsPreview_'+homeLogStudentId);
+    if(preview){
+      preview.innerHTML = `
+        <span class="hs-log-item"><strong>오늘 수업</strong> ${lessonContent ? escapeHtml(lessonContent) : '<span class="hs-log-empty">아직 기록 없음</span>'}</span>
+        <span class="hs-log-item"><strong>오늘 과제</strong> ${todayHomework ? escapeHtml(todayHomework) : '<span class="hs-log-empty">아직 없음</span>'}</span>`;
+    }
+  }
   alert('수업일지가 저장됐습니다.');
 });
 
