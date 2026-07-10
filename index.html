@@ -1378,11 +1378,11 @@ function composeClassReport(studentName, { lessonContent, hwState, understanding
   if(lessonContent) todayLines.push(toSentence(lessonContent.match(/[.!?요]$/) ? lessonContent : lessonContent + ' 진도 나갔어요'));
   if(hwState && HW_STATE_SENTENCE[hwState]) todayLines.push(HW_STATE_SENTENCE[hwState](studentName));
   if(understanding) todayLines.push(toSentence(understanding));
+  if(attitude) todayLines.push(toSentence(attitude));
   if(notes) todayLines.push(toSentence(notes));
 
   const nextLines = [];
   if(nextPlan) nextLines.push(toSentence(`다음 시간에는 ${nextPlan}`) .replace(/\.$/, '') + ' 확인하고 이어서 진도 나갈게요.');
-  if(attitude) nextLines.push(toSentence(attitude));
 
   let out = `📌 ${dateLabel} 수업\n${todayLines.join('\n')}`;
   if(nextLines.length) out += `\n\n📌 다음 시간\n${nextLines.join('\n')}`;
