@@ -357,6 +357,10 @@
             <option value="퇴원">퇴원</option>
           </select>
         </div>
+        <div style="display:flex;align-items:center;gap:8px;padding-top:22px;">
+          <input type="checkbox" id="stuSendDailyReport" checked style="width:auto;">
+          <label style="margin:0;" for="stuSendDailyReport">일일 수업 리포트 발송</label>
+        </div>
       </div>
       <button class="btn btn-primary" id="addStudentBtn">학생 등록하기</button>
       <button class="btn btn-ghost" id="cancelEditBtn" style="display:none;margin-left:8px;">수정 취소</button>
@@ -745,17 +749,18 @@ document.getElementById('addStudentBtn').addEventListener('click', async ()=>{
   const guardianPhone = document.getElementById('stuGuardianPhone').value.trim();
   const classTime = document.getElementById('stuClassTime').value;
   const enrollStatus = document.getElementById('stuEnrollStatus').value;
+  const sendDailyReport = document.getElementById('stuSendDailyReport').checked;
   if(!name){ alert('학생 이름을 입력해 주세요.'); return; }
 
   if(editingStudentId){
-    const { error } = await sb.from('students').update({ name, grade, school, phone, guardian_phone: guardianPhone, class_time: classTime || null, enrollment_status: enrollStatus }).eq('id', editingStudentId);
+    const { error } = await sb.from('students').update({ name, grade, school, phone, guardian_phone: guardianPhone, class_time: classTime || null, enrollment_status: enrollStatus, send_daily_report: sendDailyReport }).eq('id', editingStudentId);
     if(error){ alert('수정 실패: '+error.message); return; }
     exitEditMode();
   } else {
-    const { error } = await sb.from('students').insert({ name, grade, school, phone, guardian_phone: guardianPhone, class_time: classTime || null, enrollment_status: enrollStatus });
+    const { error } = await sb.from('students').insert({ name, grade, school, phone, guardian_phone: guardianPhone, class_time: classTime || null, enrollment_status: enrollStatus, send_daily_report: sendDailyReport });
     if(error){ alert('등록 실패: '+error.message); return; }
   }
-  document.getElementById('stuName').value=''; document.getElementById('stuSchool').value=''; document.getElementById('stuPhone').value=''; document.getElementById('stuGuardianPhone').value=''; document.getElementById('stuClassTime').value=''; document.getElementById('stuEnrollStatus').value='재원';
+  document.getElementById('stuName').value=''; document.getElementById('stuSchool').value=''; document.getElementById('stuPhone').value=''; document.getElementById('stuGuardianPhone').value=''; document.getElementById('stuClassTime').value=''; document.getElementById('stuEnrollStatus').value='재원'; document.getElementById('stuSendDailyReport').checked=true;
   await loadStudents(); renderStudentTable(); renderStudentFilters();
 });
 
@@ -771,6 +776,7 @@ function editStudent(id){
   document.getElementById('stuGuardianPhone').value = s.guardian_phone || '';
   document.getElementById('stuClassTime').value = s.class_time || '';
   document.getElementById('stuEnrollStatus').value = s.enrollment_status || '재원';
+  document.getElementById('stuSendDailyReport').checked = s.send_daily_report !== false;
   document.getElementById('addStudentBtn').textContent = '수정 완료';
   document.getElementById('cancelEditBtn').style.display = 'inline-block';
   document.getElementById('stuName').scrollIntoView({behavior:'smooth', block:'center'});
@@ -778,7 +784,7 @@ function editStudent(id){
 
 function exitEditMode(){
   editingStudentId = null;
-  document.getElementById('stuName').value=''; document.getElementById('stuSchool').value=''; document.getElementById('stuPhone').value=''; document.getElementById('stuGuardianPhone').value=''; document.getElementById('stuClassTime').value=''; document.getElementById('stuGrade').value='중1'; document.getElementById('stuEnrollStatus').value='재원';
+  document.getElementById('stuName').value=''; document.getElementById('stuSchool').value=''; document.getElementById('stuPhone').value=''; document.getElementById('stuGuardianPhone').value=''; document.getElementById('stuClassTime').value=''; document.getElementById('stuGrade').value='중1'; document.getElementById('stuEnrollStatus').value='재원'; document.getElementById('stuSendDailyReport').checked=true;
   document.getElementById('addStudentBtn').textContent = '학생 등록하기';
   document.getElementById('cancelEditBtn').style.display = 'none';
 }
