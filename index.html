@@ -469,6 +469,11 @@
       </div>
       <div class="grid-form">
         <div style="grid-column:1/-1;"><label>내용</label><textarea id="hwDesc" rows="3" placeholder="숙제 상세 내용을 적어주세요."></textarea></div>
+        <div style="grid-column:1/-1;">
+          <label>문제 파일/사진 (선택)</label>
+          <input type="file" id="hwProblemFile" multiple>
+          <p style="font-size:11.5px;color:var(--ink-soft);margin:4px 0 0;">문제지 사진이나 파일을 첨부하면, 학생이 숙제 화면에서 바로 열어볼 수 있어요.</p>
+        </div>
         <div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;">
           <input type="checkbox" id="hwSendKakao" checked style="width:auto;">
           <label style="margin:0;" for="hwSendKakao">마감 하루 전 카카오 알림톡 보내기</label>
@@ -678,6 +683,12 @@ function submissionFiles(sub){
   if(Array.isArray(sub.files) && sub.files.length) return sub.files;
   if(sub.file_path) return [{ path: sub.file_path, name: sub.file_name }];
   return [];
+}
+
+// 선생님이 숙제 등록 시 첨부한 문제 파일 목록
+function problemFiles(hw){
+  if(!hw || !Array.isArray(hw.files)) return [];
+  return hw.files;
 }
 
 // 마감일 기준 D-day 정보 계산 (오늘/내일/모레는 임박으로 강조)
@@ -1859,17 +1870,43 @@ document.getElementById('addHwBtn').addEventListener('click', async ()=>{
   const sendKakao = document.getElementById('hwSendKakao').checked;
   if(!title){ alert('숙제 제목을 선택하거나 직접 입력해 주세요.'); return; }
   if(!classTime && !studentId){ alert('대상 반 또는 대상 학생 중 하나는 선택해 주세요.'); return; }
-  const { error } = await sb.from('assignments').insert({
+
+  const addBtn = document.getElementById('addHwBtn');
+  addBtn.disabled = true; addBtn.textContent = '등록 중...';
+
+  const { data: inserted, error } = await sb.from('assignments').insert({
     title, description, due_date: dueDate || null,
     class_time: classTime || null, student_id: studentId || null,
     send_kakao_reminder: sendKakao
-  });
-  if(error){ alert('등록 실패: '+error.message); return; }
+  }).select().single();
+  if(error){ alert('등록 실패: '+error.message); addBtn.disabled = false; addBtn.textContent = '숙제 등록하기'; return; }
+
+  // 문제 파일이 선택되어 있으면 업로드 후 방금 등록한 숙제에 연결
+  const fileInput = document.getElementById('hwProblemFile');
+  const pickedFiles = fileInput ? Array.from(fileInput.files) : [];
+  if(pickedFiles.length){
+    const files = [];
+    for(const file of pickedFiles){
+      if(file.size > 20 * 1024 * 1024){ alert(`"${file.name}" 파일이 20MB를 넘어서 건너뜁니다.`); continue; }
+      const safeName = file.name.replace(/[^\w.\-가-힣]/g, '_');
+      const path = `problems/${inserted.id}/${Date.now()}_${safeName}`;
+      const { error: upErr } = await sb.storage.from(HW_BUCKET).upload(path, file, { upsert: true });
+      if(upErr){ alert(`"${file.name}" 업로드 실패: `+upErr.message); continue; }
+      files.push({ path, name: file.name });
+    }
+    if(files.length){
+      const { error: updErr } = await sb.from('assignments').update({ files }).eq('id', inserted.id);
+      if(updErr) alert('문제 파일 연결 실패: '+updErr.message);
+    }
+  }
+
   document.getElementById('hwTitleSelect').value='프린트 풀이';
   document.getElementById('hwTitleCustom').style.display='none'; document.getElementById('hwTitleCustom').value='';
   document.getElementById('hwDesc').value='';
   document.getElementById('hwClassTime').value=''; document.getElementById('hwStudent').value='';
   document.getElementById('hwSendKakao').checked = true;
+  if(fileInput) fileInput.value = '';
+  addBtn.disabled = false; addBtn.textContent = '숙제 등록하기';
   await loadAssignmentsAndSubmissions();
   renderHwList();
 });
@@ -1914,6 +1951,7 @@ function renderHwList(){
         </div>
       </div>
       ${hw.description ? `<p style="color:var(--ink-soft);font-size:13.5px;margin:8px 0 12px;">${escapeHtml(hw.description)}</p>` : ''}
+      ${problemFiles(hw).length ? `<div style="margin:0 0 12px;">${problemFiles(hw).map(f=>`<button class="btn btn-ghost btn-sm" style="margin:2px;" onclick="viewSubmissionFile('${f.path}')">📎 ${escapeHtml(f.name||'문제파일')}</button>`).join('')}</div>` : ''}
       <table><thead><tr><th>학생</th><th>제출 여부</th><th>제출 내용</th><th>첨부파일</th><th>선생님 피드백</th></tr></thead><tbody>
       ${targets.map(s=>{
         const sub = subForThis.find(x=>x.student_id===s.id);
@@ -2022,6 +2060,7 @@ function renderMyHw(){
         ${dd && !submitted ? `<span class="dday ${dd.cls}">${dd.text}</span>` : ''}
       </p>
       ${hw.description ? `<p style="font-size:14px;margin:8px 0 12px;">${escapeHtml(hw.description)}</p>` : ''}
+      ${problemFiles(hw).length ? `<div style="margin:0 0 12px;">${problemFiles(hw).map(f=>`<button type="button" class="btn btn-ghost btn-sm" style="margin:2px;" onclick="viewSubmissionFile('${f.path}')">📎 ${escapeHtml(f.name||'문제파일')}</button>`).join('')}</div>` : ''}
       <textarea id="hwSubmit_${hw.id}" rows="2" placeholder="숙제 완료 내용이나 질문을 적어주세요." style="margin-bottom:8px;">${sub && sub.content ? escapeHtml(sub.content) : ''}</textarea>
       <div class="hw-file-list" id="hwFileList_${hw.id}">
         ${submissionFiles(sub).map((f,i)=>`
