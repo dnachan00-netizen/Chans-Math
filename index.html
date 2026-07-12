@@ -391,6 +391,7 @@
       <button class="btn btn-primary" id="addStudentBtn">학생 등록하기</button>
       <button class="btn btn-ghost" id="cancelEditBtn" style="display:none;margin-left:8px;">수정 취소</button>
       <button class="btn btn-ghost" id="syncGuardianBtn" style="display:none;margin-left:8px;">👪 학부모 계정 동기화</button>
+      <button class="btn btn-ghost" id="syncStudentBtn" style="display:none;margin-left:8px;">🎓 학생 계정 동기화</button>
     </div>
     <div class="panel">
       <div class="toolbar">
@@ -987,6 +988,19 @@ document.querySelectorAll('#guardianView .tab-btn').forEach(btn=>{
   });
 });
 
+async function syncStudentAccount(studentId){
+  try{
+    const { data, error } = await sb.functions.invoke('sync-student-account', { body: { student_id: studentId } });
+    if(error){ alert('학생 계정 처리 실패: ' + error.message); return null; }
+    if(data && data.ok) return data;
+    alert('학생 계정 처리 실패: ' + (data && data.message ? data.message : '알 수 없는 오류'));
+    return null;
+  }catch(e){
+    alert('학생 계정 처리 중 오류가 발생했습니다: ' + e.message);
+    return null;
+  }
+}
+
 document.getElementById('addStudentBtn').addEventListener('click', async ()=>{
   const name = document.getElementById('stuName').value.trim();
   const grade = document.getElementById('stuGrade').value;
@@ -1004,8 +1018,19 @@ document.getElementById('addStudentBtn').addEventListener('click', async ()=>{
     if(error){ alert('수정 실패: '+error.message); return; }
     exitEditMode();
   } else {
-    const { error } = await sb.from('students').insert({ name, grade, school, phone, guardian_phone: guardianPhone, class_time: classTime || null, enrollment_status: enrollStatus, send_daily_report: sendDailyReport, report_send_time: reportSendTime });
+    const { data: inserted, error } = await sb.from('students').insert({ name, grade, school, phone, guardian_phone: guardianPhone, class_time: classTime || null, enrollment_status: enrollStatus, send_daily_report: sendDailyReport, report_send_time: reportSendTime }).select().single();
     if(error){ alert('등록 실패: '+error.message); return; }
+    if(phone){
+      const btn = document.getElementById('addStudentBtn');
+      btn.disabled = true; btn.textContent = '계정 생성 중...';
+      const result = await syncStudentAccount(inserted.id);
+      btn.disabled = false; btn.textContent = '학생 등록하기';
+      if(result){
+        alert(`학생 등록 완료! (로그인 계정 ${result.status})\n\n아이디: ${result.email}\n비밀번호: ${result.password}\n\n이 정보를 학생에게 안내해 주세요.`);
+      }
+    } else {
+      alert('학생이 등록되었습니다.\n(연락처가 없어 로그인 계정은 자동 생성되지 않았습니다 — 나중에 연락처를 입력하고 "학생 계정 동기화" 버튼으로 만드실 수 있습니다.)');
+    }
   }
   document.getElementById('stuName').value=''; document.getElementById('stuSchool').value=''; document.getElementById('stuPhone').value=''; document.getElementById('stuGuardianPhone').value=''; document.getElementById('stuClassTime').value=''; document.getElementById('stuEnrollStatus').value='재원'; document.getElementById('stuSendDailyReport').checked=true; document.getElementById('stuReportSendTime').value='';
   await loadStudents(); renderStudentTable(); renderStudentFilters();
@@ -1044,6 +1069,26 @@ document.getElementById('syncGuardianBtn').addEventListener('click', async ()=>{
   btn.disabled = false; btn.textContent = '👪 학부모 계정 동기화';
 });
 
+document.getElementById('syncStudentBtn').addEventListener('click', async ()=>{
+  if(!editingStudentId) return;
+  const s = findStudent(editingStudentId);
+  if(!s || !s.phone || !s.phone.trim()){
+    alert('먼저 학생 연락처를 입력하고 저장한 뒤 시도해 주세요.');
+    return;
+  }
+  const btn = document.getElementById('syncStudentBtn');
+  btn.disabled = true; btn.textContent = '동기화 중...';
+  const result = await syncStudentAccount(editingStudentId);
+  if(result){
+    alert(
+      `학생 계정 동기화 완료 (${result.status})\n\n` +
+      `아이디: ${result.email}\n비밀번호: ${result.password}\n\n` +
+      `이 정보를 학생에게 안내해 주세요.`
+    );
+  }
+  btn.disabled = false; btn.textContent = '🎓 학생 계정 동기화';
+});
+
 function editStudent(id){
   const s = findStudent(id); if(!s) return;
   editingStudentId = id;
@@ -1059,6 +1104,7 @@ function editStudent(id){
   document.getElementById('addStudentBtn').textContent = '수정 완료';
   document.getElementById('cancelEditBtn').style.display = 'inline-block';
   document.getElementById('syncGuardianBtn').style.display = 'inline-block';
+  document.getElementById('syncStudentBtn').style.display = 'inline-block';
   document.getElementById('stuName').scrollIntoView({behavior:'smooth', block:'center'});
 }
 
@@ -1068,6 +1114,7 @@ function exitEditMode(){
   document.getElementById('addStudentBtn').textContent = '학생 등록하기';
   document.getElementById('cancelEditBtn').style.display = 'none';
   document.getElementById('syncGuardianBtn').style.display = 'none';
+  document.getElementById('syncStudentBtn').style.display = 'none';
 }
 
 document.getElementById('studentSearch').addEventListener('input', renderStudentTable);
