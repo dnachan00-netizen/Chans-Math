@@ -69,6 +69,24 @@
   #studentView nav.tabs button .tab-icon{font-size:21px;line-height:1;}
   #studentView nav.tabs button.active{background:var(--accent-soft);color:var(--accent);box-shadow:none;}
 
+  /* 학부모 화면: 학생 화면과 동일한 레이아웃(하단 탭바 등) 재사용 */
+  #guardianView main{max-width:640px;margin:0 auto;padding:0 16px calc(88px + env(safe-area-inset-bottom));}
+  #guardianView nav.tabs{
+    position:fixed;bottom:0;left:0;right:0;
+    display:flex;gap:4px;background:var(--panel);
+    border-top:1px solid var(--line);border-bottom:none;
+    padding:8px 12px calc(8px + env(safe-area-inset-bottom));
+    box-shadow:0 -6px 20px rgba(27,35,64,0.08);
+    z-index:200;max-width:640px;margin:0 auto;
+  }
+  #guardianView nav.tabs button{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    padding:8px 4px;border-radius:14px;font-size:11.5px;font-weight:700;color:var(--ink-soft);
+  }
+  #guardianView nav.tabs button .tab-icon{font-size:21px;line-height:1;}
+  #guardianView nav.tabs button.active{background:var(--accent-soft);color:var(--accent);box-shadow:none;}
+  #guardianChildSelectWrap select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);font-size:14px;font-family:var(--sans);background:var(--panel);color:var(--ink);margin:0 0 4px;}
+
   .staff-layout{display:flex;align-items:stretch;}
   .sidebar{width:220px;flex-shrink:0;background:var(--ink);min-height:calc(100vh - 68px);padding:22px 0;display:flex;flex-direction:column;gap:2px;}
   .sidebar-title{font-family:var(--mono);font-size:11px;letter-spacing:2px;color:#6b7397;padding:0 24px 14px;}
@@ -548,6 +566,39 @@
   </nav>
 </div>
 
+<!-- ================= 학부모 전용 화면 ================= -->
+<div id="guardianView" style="display:none;">
+  <div id="guardianGreeting"></div>
+  <div id="guardianPushPrompt" style="display:none;margin:0 16px 14px;padding:12px 14px;border-radius:12px;background:var(--accent-soft);display:flex;align-items:center;justify-content:space-between;gap:10px;">
+    <span style="font-size:13.5px;">📱 리포트 알림을 폰으로 바로 받아보세요</span>
+    <button id="guardianPushEnableBtn" class="btn btn-primary btn-sm" style="white-space:nowrap;">알림 받기</button>
+  </div>
+  <main>
+    <div id="guardianChildSelectWrap"></div>
+    <section id="gtab-report" class="tab-panel">
+      <div class="panel">
+        <h2 style="margin:0 0 16px;">일일 리포트</h2>
+        <div id="gReportListWrap"></div>
+      </div>
+    </section>
+    <section id="gtab-info" class="tab-panel" style="display:none;">
+      <div class="panel">
+        <h2 style="margin:0 0 16px;">출결 현황</h2>
+        <div class="stat-row" id="gAttStatRow"></div>
+        <div id="gAttTableWrap"></div>
+      </div>
+      <div class="panel">
+        <h2 style="margin:0 0 16px;">숙제 현황</h2>
+        <div id="gHwListWrap"></div>
+      </div>
+    </section>
+  </main>
+  <nav class="tabs">
+    <button class="tab-btn active" data-gtab="report"><span class="tab-icon">📋</span><span class="tab-label">리포트</span></button>
+    <button class="tab-btn" data-gtab="info"><span class="tab-icon">📊</span><span class="tab-label">출결·숙제</span></button>
+  </nav>
+</div>
+
 <footer>CHANCE MATH · 모든 데이터는 Supabase 클라우드 데이터베이스에 실시간으로 저장됩니다.</footer>
 </div>
 
@@ -659,6 +710,62 @@ document.getElementById('pushEnableBtn').addEventListener('click', async ()=>{
 });
 // ─────────────────────────────────────────────────────
 
+// 학부모용 구독 정보 저장 (guardian_push_subscriptions 테이블, 학생용과 완전히 별도)
+async function subscribeAndSaveGuardianPush(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  try{
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if(!subscription){
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+    const json = subscription.toJSON();
+    const { error } = await sb.from('guardian_push_subscriptions').upsert({
+      guardian_id: currentGuardianId,
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth
+    }, { onConflict: 'endpoint' });
+    if(error){ console.error('구독 정보 저장 실패', error); return false; }
+    return true;
+  }catch(e){
+    console.error('푸시 구독 실패', e);
+    return false;
+  }
+}
+
+async function initGuardianPushPrompt(){
+  if(!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  const prompt = document.getElementById('guardianPushPrompt');
+  if(Notification.permission === 'granted'){
+    prompt.style.display = 'none';
+    await subscribeAndSaveGuardianPush();
+  } else if(Notification.permission === 'default'){
+    prompt.style.display = 'flex';
+  } else {
+    prompt.style.display = 'none';
+  }
+}
+
+document.getElementById('guardianPushEnableBtn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('guardianPushEnableBtn');
+  btn.disabled = true; btn.textContent = '설정 중...';
+  const permission = await Notification.requestPermission();
+  if(permission === 'granted'){
+    const ok = await subscribeAndSaveGuardianPush();
+    document.getElementById('guardianPushPrompt').style.display = 'none';
+    if(!ok) alert('알림 설정에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+  } else {
+    alert('알림이 차단되었습니다. 나중에 폰 설정에서 다시 허용하실 수 있어요.');
+    document.getElementById('guardianPushPrompt').style.display = 'none';
+  }
+  btn.disabled = false; btn.textContent = '알림 받기';
+});
+// ─────────────────────────────────────────────────────
+
 let students = [];
 let attendance = [];
 let scores = [];
@@ -667,6 +774,13 @@ let scoreSelectedStudentId = null;
 let editingStudentId = null;
 let currentRole = null;
 let currentStudentId = null;
+let currentGuardianId = null;
+let guardianChildren = [];
+let selectedGuardianChildId = null;
+let guardianAttendance = [];
+let guardianAssignments = [];
+let guardianSubmissions = [];
+let guardianReports = [];
 let assignments = [];
 let submissions = [];
 let counselingNotes = [];
@@ -767,20 +881,31 @@ async function enterApp(session){
   }
   currentRole = profile.role;
   currentStudentId = profile.student_id;
+  currentGuardianId = session.user.id;
 
   if(currentRole === 'staff'){
     document.body.classList.remove('student-mode');
     document.getElementById('staffView').style.display = 'flex';
     document.getElementById('studentView').style.display = 'none';
+    document.getElementById('guardianView').style.display = 'none';
     document.getElementById('whoLabel').textContent = session.user.email;
     await refreshAll();
     await loadAssignmentsAndSubmissions();
     renderHwList();
+  } else if(currentRole === 'guardian'){
+    document.body.classList.add('student-mode');
+    document.querySelector('header h1').textContent = '찬스수학';
+    document.getElementById('staffView').style.display = 'none';
+    document.getElementById('studentView').style.display = 'none';
+    document.getElementById('guardianView').style.display = 'block';
+    await refreshGuardianPortal();
+    await initGuardianPushPrompt();
   } else {
     document.body.classList.add('student-mode');
     document.querySelector('header h1').textContent = '찬스수학';
     document.getElementById('staffView').style.display = 'none';
     document.getElementById('studentView').style.display = 'block';
+    document.getElementById('guardianView').style.display = 'none';
     await refreshStudentPortal();
     await initPushPrompt();
   }
@@ -836,6 +961,15 @@ document.querySelectorAll('#studentView .tab-btn').forEach(btn=>{
     btn.classList.add('active');
     document.querySelectorAll('#studentView .tab-panel').forEach(p=>p.style.display='none');
     document.getElementById('stab-'+btn.dataset.stab).style.display='block';
+  });
+});
+
+document.querySelectorAll('#guardianView .tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#guardianView .tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('#guardianView .tab-panel').forEach(p=>p.style.display='none');
+    document.getElementById('gtab-'+btn.dataset.gtab).style.display='block';
   });
 });
 
@@ -2187,6 +2321,138 @@ function renderMyInfo(){
     });
     scoreWrap.innerHTML = html + `</tbody></table>`;
   }
+}
+
+/* =========================================================
+   학부모 포털
+========================================================= */
+
+async function refreshGuardianPortal(){
+  await loadGuardianChildren();
+  renderGuardianChildSelect();
+  await loadGuardianChildData();
+  renderGuardianGreeting();
+  renderGuardianReports();
+  renderGuardianInfo();
+}
+
+async function loadGuardianChildren(){
+  const { data, error } = await sb.from('guardian_students')
+    .select('student_id, students(*)').eq('guardian_id', currentGuardianId);
+  if(error){ alert('자녀 정보를 불러오지 못했습니다: '+error.message); return; }
+  guardianChildren = (data || []).map(r=>r.students).filter(Boolean);
+  if(guardianChildren.length && !guardianChildren.some(c=>c.id===selectedGuardianChildId)){
+    selectedGuardianChildId = guardianChildren[0].id;
+  }
+}
+
+function renderGuardianChildSelect(){
+  const wrap = document.getElementById('guardianChildSelectWrap');
+  if(guardianChildren.length === 0){
+    wrap.innerHTML = `<div class="empty">연결된 자녀 정보가 없습니다. 원장님께 문의해 주세요.</div>`;
+    return;
+  }
+  if(guardianChildren.length === 1){ wrap.innerHTML = ''; return; }
+  wrap.innerHTML = `<select id="guardianChildSelect">
+    ${guardianChildren.map(c=>`<option value="${c.id}" ${c.id===selectedGuardianChildId?'selected':''}>${escapeHtml(c.name)} (${escapeHtml(c.class_time)||'반 미배정'})</option>`).join('')}
+  </select>`;
+  document.getElementById('guardianChildSelect').addEventListener('change', async (e)=>{
+    selectedGuardianChildId = e.target.value;
+    await loadGuardianChildData();
+    renderGuardianGreeting();
+    renderGuardianReports();
+    renderGuardianInfo();
+  });
+}
+
+// 이 학부모가 연결된 모든 자녀에 대해 RLS로 조회되므로, 선택된 자녀 것만 다시 걸러냄
+async function loadGuardianChildData(){
+  if(!selectedGuardianChildId){ guardianAttendance=[]; guardianAssignments=[]; guardianSubmissions=[]; guardianReports=[]; return; }
+  const child = guardianChildren.find(c=>c.id===selectedGuardianChildId);
+
+  const [attRes, asgRes, logRes, subRes] = await Promise.all([
+    sb.from('attendance').select('*').eq('student_id', selectedGuardianChildId),
+    sb.from('assignments').select('*').order('due_date', {ascending:true}),
+    sb.from('class_logs').select('*').eq('student_id', selectedGuardianChildId).order('note_date', {ascending:false}),
+    sb.from('submissions').select('*').eq('student_id', selectedGuardianChildId)
+  ]);
+  if(attRes.error || asgRes.error || logRes.error || subRes.error){
+    alert('정보를 불러오는 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+  }
+  guardianAttendance = attRes.data || [];
+  guardianReports = logRes.data || [];
+  guardianSubmissions = subRes.data || [];
+  // 자녀가 여러 명이면 assignments에 다른 자녀 것도 섞여서 오므로, 선택된 자녀 것만 남김
+  guardianAssignments = (asgRes.data || []).filter(a =>
+    a.student_id === selectedGuardianChildId ||
+    (!a.student_id && child && a.class_time === child.class_time)
+  );
+}
+
+function renderGuardianGreeting(){
+  const el = document.getElementById('guardianGreeting');
+  const child = guardianChildren.find(c=>c.id===selectedGuardianChildId);
+  if(!child){ el.innerHTML = ''; return; }
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
+  el.innerHTML = `
+    <div class="sg-name">${escapeHtml(child.name)} 학생 보호자님 👋</div>
+    <div class="sg-sub">${dateStr} · ${escapeHtml(child.class_time)||'반 미배정'}</div>`;
+}
+
+function renderGuardianReports(){
+  const wrap = document.getElementById('gReportListWrap');
+  const withText = guardianReports.filter(log => log.composed_report || log.lesson_content);
+  if(withText.length === 0){ wrap.innerHTML = `<div class="empty">아직 등록된 리포트가 없습니다.</div>`; return; }
+  let html = '';
+  withText.forEach(log=>{
+    const text = log.composed_report || log.lesson_content;
+    html += `<div class="hw-card" style="border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;">
+      <div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin-bottom:8px;">${fmtDate(log.note_date)}</div>
+      <div style="white-space:pre-wrap;font-size:14px;line-height:1.6;">${escapeHtml(text)}</div>
+    </div>`;
+  });
+  wrap.innerHTML = html;
+}
+
+function renderGuardianInfo(){
+  const total = guardianAttendance.length;
+  const present = guardianAttendance.filter(a=>a.status==='출석').length;
+  const late = guardianAttendance.filter(a=>a.status==='지각').length;
+  const absent = guardianAttendance.filter(a=>a.status==='결석').length;
+  document.getElementById('gAttStatRow').innerHTML = `
+    <div class="stat-card"><div class="label">전체 기록</div><div class="value">${total}건</div></div>
+    <div class="stat-card"><div class="label">출석</div><div class="value" style="color:var(--accent);">${present}건</div></div>
+    <div class="stat-card"><div class="label">지각</div><div class="value" style="color:var(--late);">${late}건</div></div>
+    <div class="stat-card"><div class="label">결석</div><div class="value" style="color:var(--warn);">${absent}건</div></div>`;
+
+  const attWrap = document.getElementById('gAttTableWrap');
+  if(guardianAttendance.length === 0){ attWrap.innerHTML = `<div class="empty">출결 기록이 없습니다.</div>`; }
+  else {
+    let html = `<table><thead><tr><th>날짜</th><th>출결 상태</th></tr></thead><tbody>`;
+    guardianAttendance.slice().sort((a,b)=>b.date.localeCompare(a.date)).forEach(a=>{
+      const badgeClass = a.status==='출석'?'badge-present':a.status==='지각'?'badge-late':'badge-absent';
+      html += `<tr><td class="score-num">${fmtDate(a.date)}</td><td><span class="badge ${badgeClass}">${a.status}</span></td></tr>`;
+    });
+    attWrap.innerHTML = html + `</tbody></table>`;
+  }
+
+  const hwWrap = document.getElementById('gHwListWrap');
+  if(guardianAssignments.length === 0){ hwWrap.innerHTML = `<div class="empty">등록된 숙제가 없습니다.</div>`; return; }
+  let hwHtml = '';
+  guardianAssignments.slice().sort((a,b)=> (b.due_date||'').localeCompare(a.due_date||'')).forEach(hw=>{
+    const sub = guardianSubmissions.find(s=>s.assignment_id===hw.id);
+    const submitted = sub && sub.submitted_at;
+    hwHtml += `<div class="hw-card" style="border:1px solid var(--line);border-left:4px solid ${submitted?'var(--accent)':'var(--line)'};border-radius:12px;padding:14px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <strong>${escapeHtml(hw.title)}</strong>
+        <span class="badge ${submitted?'badge-present':'badge-late'}">${submitted?'✅ 제출완료':'미제출'}</span>
+      </div>
+      <p style="color:var(--ink-soft);font-size:13px;margin:6px 0;">${hw.due_date?'마감 '+fmtDate(hw.due_date):'마감일 없음'}</p>
+      ${sub && sub.teacher_feedback ? `<div style="margin-top:8px;padding:10px;background:var(--accent-soft);border-radius:8px;font-size:13px;color:var(--accent);"><strong>선생님 피드백:</strong> ${escapeHtml(sub.teacher_feedback)}</div>` : ''}
+    </div>`;
+  });
+  hwWrap.innerHTML = hwHtml;
 }
 
 // 홈 화면에 앱처럼 설치할 수 있도록 서비스워커 등록 (지원 안 하는 브라우저는 조용히 무시)
