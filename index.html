@@ -318,6 +318,7 @@
   <button class="tab-btn" data-tab="scores"><span class="num">03</span>성적 관리</button>
   <button class="tab-btn" data-tab="homework"><span class="num">04</span>숙제 관리</button>
   <button class="tab-btn" data-tab="counseling"><span class="num">05</span>상담 일지</button>
+  <button class="tab-btn" data-tab="announcements"><span class="num">06</span>공지사항</button>
 </nav>
 
 <div class="content-area">
@@ -534,6 +535,40 @@
       <div id="cnListWrap"></div>
     </div>
   </section>
+
+  <section id="tab-announcements" class="tab-panel" style="display:none;">
+    <div class="panel">
+      <h2>공지사항 작성</h2>
+      <p class="desc">저장하면 학부모 앱 "공지" 탭에 바로 나타납니다. 대상을 반으로 좁히면 그 반 학부모에게만 보입니다.</p>
+      <div class="grid-form">
+        <div><label>대상</label>
+          <select id="annTarget">
+            <option value="">전체 공지</option>
+            <option value="월목 15:20">월목 15:20</option>
+            <option value="월목 17:00">월목 17:00</option>
+            <option value="월목 18:40">월목 18:40</option>
+            <option value="월목 20:20">월목 20:20</option>
+            <option value="화금 15:20">화금 15:20</option>
+            <option value="화금 17:00">화금 17:00</option>
+            <option value="화금 18:40">화금 18:40</option>
+            <option value="화금 20:20">화금 20:20</option>
+            <option value="토일 09:20">토일 09:20</option>
+            <option value="토일 11:00">토일 11:00</option>
+            <option value="토일 13:00">토일 13:00</option>
+            <option value="토일 14:40">토일 14:40</option>
+            <option value="토일 16:20">토일 16:20</option>
+          </select>
+        </div>
+        <div><label>제목</label><input type="text" id="annTitle" placeholder="예: 8월 15일 휴원 안내"></div>
+        <div style="grid-column:1/-1;"><label>내용</label><textarea id="annContent" rows="4" placeholder="공지 내용을 적어주세요."></textarea></div>
+      </div>
+      <button class="btn btn-primary" id="addAnnBtn">공지 등록</button>
+    </div>
+    <div class="panel">
+      <h2 style="margin:0 0 16px;">등록된 공지 목록</h2>
+      <div id="annListWrap"></div>
+    </div>
+  </section>
 </main>
 </div><!-- /content-area -->
 </div><!-- /staffView -->
@@ -598,10 +633,17 @@
         <div id="gHwListWrap"></div>
       </div>
     </section>
+    <section id="gtab-notice" class="tab-panel" style="display:none;">
+      <div class="panel">
+        <h2 style="margin:0 0 16px;">공지사항</h2>
+        <div id="gNoticeListWrap"></div>
+      </div>
+    </section>
   </main>
   <nav class="tabs">
     <button class="tab-btn active" data-gtab="report"><span class="tab-icon">📋</span><span class="tab-label">리포트</span></button>
     <button class="tab-btn" data-gtab="info"><span class="tab-icon">📊</span><span class="tab-label">출결·숙제</span></button>
+    <button class="tab-btn" data-gtab="notice"><span class="tab-icon">📢</span><span class="tab-label">공지</span></button>
   </nav>
 </div>
 
@@ -967,6 +1009,7 @@ document.querySelectorAll('#staffView .tab-btn').forEach(btn=>{
     if(btn.dataset.tab==='homework') renderHwList();
     if(btn.dataset.tab==='counseling') renderCounselingTab();
     if(btn.dataset.tab==='home') renderHomeTab();
+    if(btn.dataset.tab==='announcements') renderAnnouncementsTab();
   });
 });
 
@@ -2009,6 +2052,58 @@ async function deleteCounselingNote(id){
   await loadCounselingNotes(); renderCounselingList();
 }
 
+/* =========================================================
+   공지사항 (스태프 작성 → 학부모 앱에 노출)
+========================================================= */
+let announcements = [];
+
+async function loadAnnouncements(){
+  const { data, error } = await sb.from('announcements').select('*').order('created_at', {ascending:false});
+  if(error){ alert('공지사항을 불러오지 못했습니다: '+error.message); return; }
+  announcements = data || [];
+}
+
+function renderAnnouncementsTab(){
+  loadAnnouncements().then(renderAnnouncementsList);
+}
+
+function renderAnnouncementsList(){
+  const wrap = document.getElementById('annListWrap');
+  if(announcements.length===0){ wrap.innerHTML = `<div class="empty">등록된 공지사항이 없습니다.</div>`; return; }
+  let html = `<table><thead><tr><th>등록일</th><th>대상</th><th>제목</th><th></th></tr></thead><tbody>`;
+  announcements.forEach(a=>{
+    html += `<tr>
+      <td>${fmtDate(a.created_at.slice(0,10))}</td>
+      <td>${a.target_class_time ? escapeHtml(a.target_class_time) : '전체'}</td>
+      <td>${escapeHtml(a.title)}</td>
+      <td><button class="btn btn-warn btn-sm" onclick="deleteAnnouncement('${a.id}')">삭제</button></td>
+    </tr>`;
+  });
+  wrap.innerHTML = html + `</tbody></table>`;
+}
+
+document.getElementById('addAnnBtn').addEventListener('click', async ()=>{
+  const target = document.getElementById('annTarget').value || null;
+  const title = document.getElementById('annTitle').value.trim();
+  const content = document.getElementById('annContent').value.trim();
+  if(!title){ alert('제목을 입력해 주세요.'); return; }
+  if(!content){ alert('내용을 입력해 주세요.'); return; }
+
+  const { error } = await sb.from('announcements').insert({ target_class_time: target, title, content });
+  if(error){ alert('등록 실패: '+error.message); return; }
+
+  document.getElementById('annTitle').value=''; document.getElementById('annContent').value=''; document.getElementById('annTarget').value='';
+  await loadAnnouncements(); renderAnnouncementsList();
+  alert('공지사항이 등록됐습니다. 학부모 앱 "공지" 탭에 바로 나타납니다.');
+});
+
+async function deleteAnnouncement(id){
+  if(!confirm('이 공지사항을 삭제하시겠습니까?')) return;
+  const { error } = await sb.from('announcements').delete().eq('id', id);
+  if(error){ alert('삭제 실패: '+error.message); return; }
+  await loadAnnouncements(); renderAnnouncementsList();
+}
+
 // 오늘 요일 기준으로 수업이 있는 반 그룹(월목/화금/토일)을 반환. 수업 없는 요일이면 null
 function todayClassGroup(){
   const day = new Date().getDay(); // 0=일 1=월 2=화 3=수 4=목 5=금 6=토
@@ -2239,6 +2334,13 @@ async function viewSubmissionFile(path){
    학생 포털
 ========================================================= */
 async function refreshStudentPortal(){
+  if(!currentStudentId){
+    document.getElementById('studentGreeting').innerHTML =
+      `<div class="sg-name">⚠️ 계정 연결에 문제가 있어요</div>
+       <div class="sg-sub">이 계정은 아직 학생 정보와 연결되지 않았습니다. 원장님께 문의해 주세요.</div>`;
+    document.getElementById('myHwListWrap') && (document.getElementById('myHwListWrap').innerHTML = '');
+    return;
+  }
   await Promise.all([loadMyStudentRow(), loadMyAssignments(), loadMyAttendance(), loadMyScores()]);
   renderStudentGreeting();
   renderMyHw();
@@ -2444,6 +2546,8 @@ async function refreshGuardianPortal(){
   renderGuardianGreeting();
   renderGuardianReports();
   renderGuardianInfo();
+  await loadGuardianAnnouncements();
+  renderGuardianNotices();
 }
 
 async function loadGuardianChildren(){
@@ -2472,6 +2576,7 @@ function renderGuardianChildSelect(){
     renderGuardianGreeting();
     renderGuardianReports();
     renderGuardianInfo();
+    renderGuardianNotices();
   });
 }
 
@@ -2563,6 +2668,36 @@ function renderGuardianInfo(){
     </div>`;
   });
   hwWrap.innerHTML = hwHtml;
+}
+
+let guardianAnnouncements = [];
+
+// 이 학부모가 연결된 모든 자녀 기준으로, 전체 공지 + 자녀들의 반(class_time)에 해당하는 공지를 가져옴
+async function loadGuardianAnnouncements(){
+  const { data, error } = await sb.from('announcements').select('*').order('created_at', {ascending:false});
+  if(error){ console.error('공지사항을 불러오지 못했습니다', error); guardianAnnouncements = []; return; }
+  guardianAnnouncements = data || [];
+}
+
+function renderGuardianNotices(){
+  const wrap = document.getElementById('gNoticeListWrap');
+  const child = guardianChildren.find(c=>c.id===selectedGuardianChildId);
+  const visible = guardianAnnouncements.filter(a =>
+    !a.target_class_time || (child && a.target_class_time === child.class_time)
+  );
+  if(visible.length === 0){ wrap.innerHTML = `<div class="empty">등록된 공지사항이 없습니다.</div>`; return; }
+  let html = '';
+  visible.forEach(a=>{
+    html += `<div class="hw-card" style="border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;">
+        <strong style="font-size:15px;">${escapeHtml(a.title)}</strong>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--ink-soft);">${fmtDate(a.created_at.slice(0,10))}</span>
+      </div>
+      ${a.target_class_time ? `<span class="badge badge-late" style="margin-top:6px;display:inline-block;">${escapeHtml(a.target_class_time)}</span>` : ''}
+      <div style="white-space:pre-wrap;font-size:14px;line-height:1.6;margin-top:8px;">${escapeHtml(a.content)}</div>
+    </div>`;
+  });
+  wrap.innerHTML = html;
 }
 
 // 홈 화면에 앱처럼 설치할 수 있도록 서비스워커 등록 (지원 안 하는 브라우저는 조용히 무시)
