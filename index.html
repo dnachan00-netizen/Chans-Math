@@ -199,6 +199,36 @@
   .hw-file-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .hw-file-remove{border:none;background:transparent;color:var(--warn);font-size:12px;font-weight:600;cursor:pointer;padding:2px 6px;flex-shrink:0;}
   .hw-file-empty{font-size:12.5px;color:var(--ink-soft);font-style:italic;}
+
+  /* 학생용 숙제 목록: 상태별로 즉각 구분되도록 (해야 할 숙제 / 다 한 숙제) */
+  .hw-group-label{font-family:var(--mono);font-size:12px;letter-spacing:1px;color:var(--ink-soft);margin:18px 0 8px;display:flex;align-items:center;gap:6px;}
+  .hw-group-label:first-child{margin-top:0;}
+  .hw-group-label.done-label{color:var(--accent);}
+  .stu-hw-card{border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:var(--panel);}
+  .stu-hw-card.todo{border-left:5px solid var(--late);background:var(--late-soft);}
+  .stu-hw-card.urgent{border-left:5px solid var(--warn);background:var(--warn-soft);}
+  .stu-hw-card.done{border-left:5px solid var(--accent);}
+  .stu-hw-card.done[open]{background:var(--accent-soft);}
+  .stu-hw-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;}
+  .stu-hw-card.done .stu-hw-summary{cursor:pointer;list-style:revert;}
+  .stu-hw-title{font-weight:700;font-size:14.5px;}
+  .stu-hw-status{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;white-space:nowrap;flex-shrink:0;}
+  .stu-hw-status.todo{background:#fff;color:var(--late);}
+  .stu-hw-status.urgent{background:#fff;color:var(--warn);}
+  .stu-hw-status.done{background:var(--accent-soft);color:var(--accent);}
+  .stu-hw-body{padding:0 16px 16px;}
+  .stu-hw-card:not(.done) .stu-hw-body{padding-top:0;}
+
+  /* 학생용 출결 현황: 정보량에 비해 자리를 많이 차지하지 않도록 한 줄 리스트로 압축 */
+  .att-summary-line{font-size:13.5px;color:var(--ink-soft);padding:0 2px 10px;}
+  .att-line-list{display:flex;flex-direction:column;border-top:1px solid var(--line);}
+  .att-line-row{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .att-line-date{font-family:var(--mono);color:var(--ink-soft);width:76px;flex-shrink:0;}
+  .att-line-status{font-weight:700;width:40px;flex-shrink:0;}
+  .att-line-status.present{color:var(--accent);}
+  .att-line-status.late{color:var(--late);}
+  .att-line-status.absent{color:var(--warn);}
+  .att-line-makeup{font-size:12.5px;color:var(--ink-soft);margin-left:auto;white-space:nowrap;}
   #detailModalOverlay{position:fixed;inset:0;background:rgba(27,35,64,0.55);display:none;align-items:flex-start;justify-content:center;z-index:1000;padding:40px 16px;overflow-y:auto;}
   #detailModalOverlay.open{display:flex;}
   #detailModalBox{background:var(--panel);border-radius:16px;max-width:760px;width:100%;padding:30px;position:relative;}
@@ -1438,7 +1468,24 @@ function renderAttStatusArea(){
       <button class="on-present ${existing&&existing.status==='출석'?'selected':''}" onclick="setAttendance('출석')">출석</button>
       <button class="on-late ${existing&&existing.status==='지각'?'selected':''}" onclick="setAttendance('지각')">지각</button>
       <button class="on-absent ${existing&&existing.status==='결석'?'selected':''}" onclick="setAttendance('결석')">결석</button>
-    </div>`;
+    </div>
+    ${existing ? `
+    <div style="margin-top:14px;max-width:220px;">
+      <label>보강</label>
+      <input type="date" id="attMakeupDate" value="${existing.makeup_date||''}" onchange="saveMakeupDate(this.value)">
+      <p style="font-size:11.5px;color:var(--ink-soft);margin:4px 0 0;">보강 날짜를 적어두면 학생 화면에도 함께 표시됩니다.</p>
+    </div>` : ''}`;
+}
+
+// 출결 상태와 별개로, 보강 날짜만 따로 저장 (이미 출결 기록이 있는 날에만 입력 가능)
+async function saveMakeupDate(value){
+  const date = document.getElementById('attDate').value;
+  const { error } = await sb.from('attendance')
+    .update({ makeup_date: value || null })
+    .eq('student_id', attSelectedStudentId).eq('date', date);
+  if(error){ alert('보강 날짜 저장 실패: '+error.message); return; }
+  await loadAttendance();
+  renderAttTable();
 }
 document.getElementById('attDate').addEventListener('change', ()=>{ renderAttStatusArea(); renderAttTable(); renderAttStats(); });
 
@@ -1916,20 +1963,20 @@ function renderAttTable(){
   list.sort((a,b)=> b.date.localeCompare(a.date));
   const wrap = document.getElementById('attTableWrap');
   if(list.length===0){ wrap.innerHTML = `<div class="empty">출결 기록이 없습니다.</div>`; return; }
-  let html = `<table><thead><tr><th>날짜</th><th>이름</th><th>학년</th><th>출결 상태</th></tr></thead><tbody>`;
+  let html = `<table><thead><tr><th>날짜</th><th>이름</th><th>학년</th><th>출결 상태</th><th>보강</th></tr></thead><tbody>`;
   list.forEach(a=>{
     const s = findStudent(a.studentId); if(!s) return;
     const badgeClass = a.status==='출석'?'badge-present':a.status==='지각'?'badge-late':'badge-absent';
-    html += `<tr><td class="score-num">${fmtDate(a.date)}</td><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.grade)}</td><td><span class="badge ${badgeClass}">${a.status}</span></td></tr>`;
+    html += `<tr><td class="score-num">${fmtDate(a.date)}</td><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.grade)}</td><td><span class="badge ${badgeClass}">${a.status}</span></td><td class="score-num">${a.makeup_date?fmtDate(a.makeup_date):'-'}</td></tr>`;
   });
   html += `</tbody></table>`;
   wrap.innerHTML = html;
 }
 
 document.getElementById('attExportBtn').addEventListener('click', ()=>{
-  const rows = [['날짜','이름','학년','출결상태']];
+  const rows = [['날짜','이름','학년','출결상태','보강']];
   attendance.slice().sort((a,b)=>b.date.localeCompare(a.date)).forEach(a=>{
-    const s = findStudent(a.studentId); if(s) rows.push([a.date, s.name, s.grade, a.status]);
+    const s = findStudent(a.studentId); if(s) rows.push([a.date, s.name, s.grade, a.status, a.makeup_date||'']);
   });
   downloadCSV('찬스수학_출결기록.csv', rows);
 });
@@ -2489,20 +2536,29 @@ function renderMyHw(){
     : '';
 
   if(assignments.length===0){ wrap.innerHTML = `<div class="empty">아직 배정된 숙제가 없습니다.</div>`; return; }
-  let html = '';
+
+  // 미제출(해야 할 숙제)과 제출완료(다 한 숙제)를 구역으로 나눠서, 한눈에 무엇을 해야 하는지 바로 보이게 함
+  const todoList = [], doneList = [];
   assignments.forEach(hw=>{
     const sub = submissions.find(s=>s.assignment_id===hw.id);
-    const submitted = sub && sub.submitted_at;
+    (sub && sub.submitted_at ? doneList : todoList).push(hw);
+  });
+
+  function hwCardHtml(hw, isDone){
+    const sub = submissions.find(s=>s.assignment_id===hw.id);
     const dd = ddayInfo(hw.due_date);
-    const accentColor = submitted ? 'var(--accent)' : (dd && dd.urgent ? 'var(--warn)' : 'var(--line)');
-    html += `<div class="hw-card" style="border:1px solid var(--line);border-left:4px solid ${accentColor};border-radius:12px;padding:16px;margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-        <strong>${escapeHtml(hw.title)}</strong>
-        <span class="badge ${submitted ? 'badge-present':'badge-late'}">${submitted ? '✅ 제출완료' : '미제출'}</span>
-      </div>
+    const urgent = !isDone && dd && dd.urgent;
+    const statusClass = isDone ? 'done' : (urgent ? 'urgent' : 'todo');
+    const statusChip = isDone
+      ? `<span class="stu-hw-status done">✅ 제출완료</span>`
+      : urgent
+        ? `<span class="stu-hw-status urgent">🔴 마감임박</span>`
+        : `<span class="stu-hw-status todo">⏳ 미제출</span>`;
+
+    const bodyHtml = `
       <p style="color:var(--ink-soft);font-size:13px;margin:6px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span>${hw.due_date ? '마감 '+fmtDate(hw.due_date) : '마감일 없음'}</span>
-        ${dd && !submitted ? `<span class="dday ${dd.cls}">${dd.text}</span>` : ''}
+        ${dd && !isDone ? `<span class="dday ${dd.cls}">${dd.text}</span>` : ''}
       </p>
       ${hw.description ? `<p style="font-size:14px;margin:8px 0 12px;">${escapeHtml(hw.description)}</p>` : ''}
       ${problemFiles(hw).length ? `<div style="margin:0 0 12px;">${problemFiles(hw).map(f=>`<button type="button" class="btn btn-ghost btn-sm" style="margin:2px;" onclick="viewSubmissionFile('${f.path}')">📎 ${escapeHtml(f.name||'문제파일')}</button>`).join('')}</div>` : ''}
@@ -2519,11 +2575,38 @@ function renderMyHw(){
         <input type="file" id="hwFile_${hw.id}" multiple>
       </div>
       <p style="font-size:11.5px;color:var(--ink-soft);margin:2px 0 8px;">숙제가 여러 장이면 한 번에 여러 개 선택하거나, 제출 후 다시 열어서 더 추가할 수 있어요. 따로 낼 게 없는 숙제라면, 아무것도 안 적고 버튼만 눌러도 "완료"로 처리됩니다.</p>
-      <button class="btn btn-primary btn-sm" onclick="submitMyHomework('${hw.id}')">${submitted ? '다시 제출하기' : '제출하기'}</button>
-      ${submitted ? `<button class="btn btn-ghost btn-sm" onclick="cancelMyHomework('${hw.id}')" style="margin-left:6px;">제출 취소</button>` : ''}
-      ${sub && sub.teacher_feedback ? `<div style="margin-top:10px;padding:10px;background:var(--accent-soft);border-radius:8px;font-size:13.5px;color:var(--accent);"><strong>선생님 피드백:</strong> ${escapeHtml(sub.teacher_feedback)}</div>` : ''}
+      <button class="btn btn-primary btn-sm" onclick="submitMyHomework('${hw.id}')">${isDone ? '다시 제출하기' : '제출하기'}</button>
+      ${isDone ? `<button class="btn btn-ghost btn-sm" onclick="cancelMyHomework('${hw.id}')" style="margin-left:6px;">제출 취소</button>` : ''}
+      ${sub && sub.teacher_feedback ? `<div style="margin-top:10px;padding:10px;background:var(--accent-soft);border-radius:8px;font-size:13.5px;color:var(--accent);"><strong>선생님 피드백:</strong> ${escapeHtml(sub.teacher_feedback)}</div>` : ''}`;
+
+    // 제출완료 숙제는 <details>로 접어둬서, "해야 할 숙제"만 펼쳐진 채로 눈에 띄게 함
+    if(isDone){
+      return `<details class="stu-hw-card ${statusClass}" id="hwCard_${hw.id}">
+        <summary class="stu-hw-summary">
+          <span class="stu-hw-title">${escapeHtml(hw.title)}</span>
+          ${statusChip}
+        </summary>
+        <div class="stu-hw-body">${bodyHtml}</div>
+      </details>`;
+    }
+    return `<div class="stu-hw-card ${statusClass}" id="hwCard_${hw.id}">
+      <div class="stu-hw-summary">
+        <span class="stu-hw-title">${escapeHtml(hw.title)}</span>
+        ${statusChip}
+      </div>
+      <div class="stu-hw-body">${bodyHtml}</div>
     </div>`;
-  });
+  }
+
+  let html = '';
+  if(todoList.length){
+    html += `<div class="hw-group-label">📌 해야 할 숙제 (${todoList.length})</div>`;
+    html += todoList.map(hw=>hwCardHtml(hw,false)).join('');
+  }
+  if(doneList.length){
+    html += `<div class="hw-group-label done-label">✅ 다 한 숙제 (${doneList.length})</div>`;
+    html += doneList.map(hw=>hwCardHtml(hw,true)).join('');
+  }
   wrap.innerHTML = html;
 }
 
@@ -2600,20 +2683,21 @@ function renderMyInfo(){
   const late = attendance.filter(a=>a.status==='지각').length;
   const absent = attendance.filter(a=>a.status==='결석').length;
   document.getElementById('myAttStatRow').innerHTML = `
-    <div class="stat-card"><div class="label">전체 기록</div><div class="value">${total}건</div></div>
-    <div class="stat-card"><div class="label">출석</div><div class="value" style="color:var(--accent);">${present}건</div></div>
-    <div class="stat-card"><div class="label">지각</div><div class="value" style="color:var(--late);">${late}건</div></div>
-    <div class="stat-card"><div class="label">결석</div><div class="value" style="color:var(--warn);">${absent}건</div></div>`;
+    <div class="att-summary-line">전체 ${total}회 · <span style="color:var(--accent);font-weight:700;">출석 ${present}</span> · <span style="color:var(--late);font-weight:700;">지각 ${late}</span> · <span style="color:var(--warn);font-weight:700;">결석 ${absent}</span></div>`;
 
   const attWrap = document.getElementById('myAttTableWrap');
   if(attendance.length===0){ attWrap.innerHTML = `<div class="empty">출결 기록이 없습니다.</div>`; }
   else {
-    let html = `<table><thead><tr><th>날짜</th><th>출결 상태</th></tr></thead><tbody>`;
+    const statusCls = s => s==='출석'?'present':s==='지각'?'late':'absent';
+    let html = `<div class="att-line-list">`;
     attendance.slice().sort((a,b)=>b.date.localeCompare(a.date)).forEach(a=>{
-      const badgeClass = a.status==='출석'?'badge-present':a.status==='지각'?'badge-late':'badge-absent';
-      html += `<tr><td class="score-num">${fmtDate(a.date)}</td><td><span class="badge ${badgeClass}">${a.status}</span></td></tr>`;
+      html += `<div class="att-line-row">
+        <span class="att-line-date">${fmtDate(a.date)}</span>
+        <span class="att-line-status ${statusCls(a.status)}">${a.status}</span>
+        <span class="att-line-makeup">${a.makeup_date ? '보강 '+fmtDate(a.makeup_date) : ''}</span>
+      </div>`;
     });
-    attWrap.innerHTML = html + `</tbody></table>`;
+    attWrap.innerHTML = html + `</div>`;
   }
 
   const total2 = scores.length;
