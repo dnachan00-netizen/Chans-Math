@@ -99,9 +99,11 @@
   .g-att-time-card .g-att-value.empty-val{color:var(--ink-soft);font-family:var(--sans);font-size:13px;font-weight:600;}
 
   /* 학부모 출결 기록 표는 컬럼이 적어서 전역 min-width:640px 규칙을 적용하지 않고 화면 폭에 맞춤 */
-  #gAttendanceBox table{min-width:0;width:100%;table-layout:fixed;}
-  #gAttendanceBox td, #gAttendanceBox th{word-break:keep-all;}
-  #gAttendanceBox th{text-align:center;}
+  /* 학부모 출결 기록 — 표 대신 줄(row) 카드 리스트 (좁은 화면에서 줄바꿈 없이 자연스럽게 들어감) */
+  .g-att-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);gap:10px;}
+  .g-att-row:last-child{border-bottom:none;}
+  .g-att-date{font-size:13.5px;font-weight:700;font-family:var(--mono);}
+  .g-att-sub{font-size:11.5px;color:var(--ink-soft);margin-top:2px;}
   .g-report-item{border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden;background:var(--panel);}
   .g-report-item summary{padding:14px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;list-style:none;}
   .g-report-item summary::-webkit-details-marker{display:none;}
@@ -2955,16 +2957,29 @@ function renderGuardianInfo(){
       const badgeClass = a.status==='출석'?'badge-present':a.status==='지각'?'badge-late':'badge-absent';
       const inT = a.check_in_time ? fmtGuardianTime(a.check_in_time) : null;
       const outT = a.check_out_time ? fmtGuardianTime(a.check_out_time) : null;
-      const timesCell = (inT || outT) ? `${inT||'-'}→${outT||'-'}` : '-';
-      rows += `<tr><td class="score-num">${fmtDate(a.date)}</td><td><span class="badge ${badgeClass}">${a.status}</span></td><td style="font-size:11.5px;">${timesCell}</td><td style="font-size:12px;color:var(--accent);">${a.makeup_date ? '보강 '+fmtDate(a.makeup_date) : '-'}</td></tr>`;
+      let timesLine;
+      if(inT && outT) timesLine = `🚪 ${inT} → 🏠 ${outT}`;
+      else if(inT) timesLine = `🚪 ${inT} → -`;
+      else if(outT) timesLine = `- → 🏠 ${outT}`;
+      else timesLine = '등하원 기록 없음';
+      const makeupLine = a.makeup_date ? `보강 ${fmtDate(a.makeup_date)}` : null;
+
+      rows += `<div class="g-att-row">
+        <div>
+          <div class="g-att-date">${fmtDate(a.date)}</div>
+          <div class="g-att-sub">${timesLine}</div>
+          ${makeupLine ? `<div class="g-att-sub" style="color:var(--accent);">${makeupLine}</div>` : ''}
+        </div>
+        <span class="badge ${badgeClass}">${a.status}</span>
+      </div>`;
     });
     attBox.innerHTML = `<details class="g-report-item">
       <summary>
         <span class="g-report-date">📅 출결 기록 (${sorted.length}건)</span>
         <span class="g-report-toggle"></span>
       </summary>
-      <div class="g-report-body" style="padding:0 0 12px;">
-        <table><thead><tr><th>날짜</th><th>상태</th><th>등하원</th><th>보강</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="g-report-body" style="padding:0 16px 4px;">
+        ${rows}
       </div>
     </details>`;
   }
