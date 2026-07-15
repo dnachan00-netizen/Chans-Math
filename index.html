@@ -123,6 +123,8 @@
   #studentView .hw-file-item{background:#171E2C;border-color:var(--line);}
   #studentView .stat-card{background:#171E2C;border-color:var(--line);}
   #studentView .stat-card .value{color:var(--ink);}
+  #studentView input[type="file"]::file-selector-button,
+  #studentView input[type="file"]::-webkit-file-upload-button{color:#3a2708;}
 
   /* 학부모 첫 화면 상단 — 오늘 등하원 시각 카드 */
   .g-att-time-row{display:flex;gap:10px;}
@@ -2685,7 +2687,7 @@ function renderMyHw(){
         <span>${fmtCreatedDateShort(hw.created_at) ? '출제 '+fmtCreatedDateShort(hw.created_at)+' · ' : ''}${hw.due_date ? '마감 '+fmtDateShort(hw.due_date) : '마감일 없음'}</span>
         ${dd && !isDone ? `<span class="dday ${dd.cls}">${dd.text}</span>` : ''}
       </p>
-      ${hw.description ? `<p style="font-size:14px;margin:8px 0 12px;">${escapeHtml(hw.description)}</p>` : ''}
+      ${hw.description ? `<p style="font-size:14px;margin:8px 0 12px;color:var(--ink);">${escapeHtml(hw.description)}</p>` : ''}
       ${problemFiles(hw).length ? `<div style="margin:0 0 12px;">${problemFiles(hw).map(f=>`<button type="button" class="btn btn-ghost btn-sm" style="margin:2px;" onclick="viewSubmissionFile('${f.path}')">📎 ${escapeHtml(f.name||'문제파일')}</button>`).join('')}</div>` : ''}
       <textarea id="hwSubmit_${hw.id}" rows="2" placeholder="숙제 완료 내용이나 질문을 적어주세요." style="margin-bottom:8px;">${sub && sub.content ? escapeHtml(sub.content) : ''}</textarea>
       <div class="hw-file-list" id="hwFileList_${hw.id}">
