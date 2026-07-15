@@ -91,6 +91,29 @@
   /* 학부모 화면 전용 강조색 (학생 화면과 시각적으로 구분되는 테라코타 계열) */
   #guardianView{ --accent:#b5583a; --accent-soft:#f6e6de; }
 
+  /* 여분 폰용 키오스크(등하원 체크인) 화면 — 로그인 없이 PIN으로만 접근 */
+  #kioskView{position:fixed;inset:0;background:var(--paper);z-index:998;display:none;overflow-y:auto;}
+  #kioskPinScreen{position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;z-index:999;}
+  #kioskPinBox{background:var(--panel);padding:40px;border-radius:16px;width:100%;max-width:320px;text-align:center;}
+  #kioskPinBox .mark{font-family:var(--mono);font-size:12px;letter-spacing:2px;color:var(--accent);margin-bottom:14px;display:block;}
+  #kioskPinBox h1{font-size:17px;margin:0 0 18px;line-height:1.4;}
+  #kioskPinInput{width:100%;font-size:30px;text-align:center;letter-spacing:14px;padding:14px 10px;border-radius:10px;border:1px solid var(--line);font-family:var(--mono);}
+  #kioskPinMsg{color:var(--warn);font-size:13px;margin-top:10px;min-height:18px;}
+  #kioskPinBox button{width:100%;margin-top:18px;}
+  #kioskMain{padding:20px;max-width:900px;margin:0 auto;}
+  .kiosk-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:10px;}
+  .kiosk-header h1{font-size:19px;margin:0;}
+  .kiosk-lock-btn{background:transparent;border:1px solid var(--line);border-radius:8px;padding:9px 14px;font-size:13px;cursor:pointer;font-family:var(--sans);}
+  #kioskClassButtons{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;}
+  .kiosk-class-btn{padding:14px 22px;font-size:16px;font-weight:700;border-radius:12px;border:2px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer;font-family:var(--sans);}
+  .kiosk-class-btn.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);}
+  #kioskStudentGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px;}
+  .kiosk-student-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center;}
+  .kiosk-student-name{font-size:19px;font-weight:800;margin-bottom:12px;}
+  .kiosk-student-actions{display:flex;flex-direction:column;gap:8px;}
+  .kiosk-action-btn{padding:16px;font-size:15px;font-weight:700;border-radius:10px;border:none;background:var(--ink);color:#fff;cursor:pointer;font-family:var(--sans);}
+  .kiosk-action-btn.done{background:var(--accent);color:#fff;}
+
   .staff-layout{display:flex;align-items:stretch;}
   .sidebar{width:220px;flex-shrink:0;background:var(--ink);min-height:calc(100vh - 68px);padding:22px 0;display:flex;flex-direction:column;gap:2px;}
   .sidebar-title{font-family:var(--mono);font-size:11px;letter-spacing:2px;color:#6b7397;padding:0 24px 14px;}
@@ -322,6 +345,30 @@
     <input type="password" id="loginPassword" placeholder="••••••••">
     <div id="loginMsg"></div>
     <button class="btn btn-primary" id="loginBtn">로그인</button>
+  </div>
+</div>
+
+<!-- 여분 폰에 켜두는 등하원 체크인 전용 화면 (index.html?kiosk=1 로 접속, 로그인 불필요) -->
+<div id="kioskView">
+  <div id="kioskPinScreen">
+    <div id="kioskPinBox">
+      <span class="mark">CHANCE MATH · 출결</span>
+      <h1>키오스크 PIN을 입력해 주세요</h1>
+      <input type="password" id="kioskPinInput" inputmode="numeric" maxlength="4" placeholder="••••">
+      <div id="kioskPinMsg"></div>
+      <button class="btn btn-primary" id="kioskPinBtn">확인</button>
+    </div>
+  </div>
+  <div id="kioskMain" style="display:none;">
+    <div class="kiosk-header">
+      <h1>📋 등하원 체크 — <span id="kioskDateLabel"></span></h1>
+      <div style="display:flex;gap:8px;">
+        <button class="kiosk-lock-btn" onclick="loadKioskData()">🔄 새로고침</button>
+        <button class="kiosk-lock-btn" onclick="kioskLock()">🔒 잠금</button>
+      </div>
+    </div>
+    <div id="kioskClassButtons"></div>
+    <div id="kioskStudentGrid"></div>
   </div>
 </div>
 
@@ -1021,6 +1068,12 @@ async function enterApp(session){
   document.getElementById('todayLabel').textContent = `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')} 기준`;
   document.getElementById('attDate').value = todayStr();
   document.getElementById('scoreDate').value = todayStr();
+
+  if(isKioskMode()){
+    await initKiosk();
+    return;
+  }
+
   const { data:{ session } } = await sb.auth.getSession();
   if(session){ enterApp(session); }
 })();
@@ -2942,6 +2995,159 @@ function renderGuardianNoticeBanner(){
     setGuardianReadAnnouncementId(latest.id);
     wrap.style.display = 'none';
   });
+}
+
+/* =========================================================
+   여분 폰용 키오스크 — 등하원 체크인 (로그인 없이 PIN으로만 접근)
+   index.html?kiosk=1 로 접속. 학부모 웹 푸시 인프라를 그대로 재사용.
+========================================================= */
+
+const KIOSK_SECRET_KEY = 'chansMathKioskSecret';
+let kioskStudents = [];
+let kioskAttendanceToday = {}; // student_id -> {check_in_time, check_out_time}
+let kioskSelectedClass = null;
+
+function isKioskMode(){
+  return new URLSearchParams(location.search).get('kiosk') === '1';
+}
+
+async function initKiosk(){
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('appRoot').style.display = 'none';
+  document.getElementById('kioskView').style.display = 'block';
+
+  const savedSecret = localStorage.getItem(KIOSK_SECRET_KEY);
+  if(savedSecret){
+    const ok = await loadKioskData();
+    if(ok) return;
+    localStorage.removeItem(KIOSK_SECRET_KEY); // 저장된 PIN이 더는 안 맞으면 초기화
+  }
+  document.getElementById('kioskPinScreen').style.display = 'flex';
+  document.getElementById('kioskMain').style.display = 'none';
+}
+
+// 키오스크 전용 Edge Function 호출 공용 헬퍼 (로그인 세션이 없으므로 x-kiosk-secret 헤더로 인증)
+async function kioskFetch(fnName, body){
+  const secret = localStorage.getItem(KIOSK_SECRET_KEY) || '';
+  let res;
+  try{
+    res = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'x-kiosk-secret': secret
+      },
+      body: JSON.stringify(body || {})
+    });
+  }catch(e){
+    return { ok:false, message: '서버에 연결하지 못했습니다: ' + e.message };
+  }
+  let json = null;
+  try{ json = await res.json(); }catch(_){ /* 응답이 JSON이 아닐 수 있음 */ }
+  if(!res.ok){
+    return { ok:false, status: res.status, message: (json && json.message) || `서버 오류 (status ${res.status})` };
+  }
+  return json || { ok:true };
+}
+
+async function loadKioskData(){
+  const result = await kioskFetch('kiosk-students', {});
+  if(!result || !result.ok) return false;
+  kioskStudents = result.students || [];
+  kioskAttendanceToday = {};
+  (result.attendance || []).forEach(a=>{ kioskAttendanceToday[a.student_id] = a; });
+  document.getElementById('kioskPinScreen').style.display = 'none';
+  document.getElementById('kioskMain').style.display = 'block';
+  document.getElementById('kioskDateLabel').textContent = todayStr();
+  renderKioskClassButtons();
+  return true;
+}
+
+async function kioskTryPin(){
+  const pin = document.getElementById('kioskPinInput').value.trim();
+  if(!pin){ return; }
+  localStorage.setItem(KIOSK_SECRET_KEY, pin);
+  document.getElementById('kioskPinMsg').textContent = '확인 중...';
+  const ok = await loadKioskData();
+  if(!ok){
+    localStorage.removeItem(KIOSK_SECRET_KEY);
+    document.getElementById('kioskPinMsg').textContent = 'PIN이 올바르지 않습니다. 다시 확인해 주세요.';
+    document.getElementById('kioskPinInput').value = '';
+  }
+}
+document.getElementById('kioskPinBtn').addEventListener('click', kioskTryPin);
+document.getElementById('kioskPinInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') kioskTryPin(); });
+
+function kioskLock(){
+  localStorage.removeItem(KIOSK_SECRET_KEY);
+  document.getElementById('kioskPinInput').value = '';
+  document.getElementById('kioskPinMsg').textContent = '';
+  document.getElementById('kioskPinScreen').style.display = 'flex';
+  document.getElementById('kioskMain').style.display = 'none';
+}
+
+// 오늘 수업 있는 반(월목/화금/토일)의 세부 반 시간대만 버튼으로 노출
+function renderKioskClassButtons(){
+  const wrap = document.getElementById('kioskClassButtons');
+  const group = todayClassGroup();
+  const todays = kioskStudents.filter(s=> group && s.class_time && s.class_time.startsWith(group));
+  const classTimes = [...new Set(todays.map(s=>s.class_time))].sort();
+
+  if(!group || classTimes.length===0){
+    wrap.innerHTML = `<div class="empty">오늘(${todayKoreanWeekday()}요일)은 예정된 수업이 없습니다.</div>`;
+    document.getElementById('kioskStudentGrid').innerHTML = '';
+    return;
+  }
+  if(!kioskSelectedClass || !classTimes.includes(kioskSelectedClass)) kioskSelectedClass = classTimes[0];
+
+  wrap.innerHTML = classTimes.map(ct=>
+    `<button class="kiosk-class-btn ${ct===kioskSelectedClass?'active':''}" onclick="selectKioskClass('${ct}')">${escapeHtml(ct)}</button>`
+  ).join('');
+  renderKioskStudentGrid();
+}
+
+function selectKioskClass(ct){
+  kioskSelectedClass = ct;
+  renderKioskClassButtons();
+}
+
+function fmtKioskTime(iso){
+  if(!iso) return '';
+  return new Date(iso).toLocaleTimeString('ko-KR', { hour:'numeric', minute:'2-digit' });
+}
+
+function renderKioskStudentGrid(){
+  const wrap = document.getElementById('kioskStudentGrid');
+  const list = kioskStudents.filter(s=>s.class_time === kioskSelectedClass);
+  if(list.length===0){ wrap.innerHTML = `<div class="empty">이 반에 학생이 없습니다.</div>`; return; }
+
+  wrap.innerHTML = list.map(s=>{
+    const att = kioskAttendanceToday[s.id] || {};
+    const inDone = !!att.check_in_time;
+    const outDone = !!att.check_out_time;
+    return `
+      <div class="kiosk-student-card">
+        <div class="kiosk-student-name">${escapeHtml(s.name)}</div>
+        <div class="kiosk-student-actions">
+          <button class="kiosk-action-btn ${inDone?'done':''}" onclick="kioskCheckin('${s.id}','in')">${inDone ? `✅ 등원 ${fmtKioskTime(att.check_in_time)}` : '🚪 등원'}</button>
+          <button class="kiosk-action-btn ${outDone?'done':''}" onclick="kioskCheckin('${s.id}','out')">${outDone ? `✅ 하원 ${fmtKioskTime(att.check_out_time)}` : '🏠 하원'}</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function kioskCheckin(studentId, type){
+  const result = await kioskFetch('kiosk-checkin', { student_id: studentId, type });
+  if(!result || !result.ok){
+    alert('처리 실패: ' + ((result && result.message) || '알 수 없는 오류'));
+    return;
+  }
+  kioskAttendanceToday[studentId] = {
+    ...(kioskAttendanceToday[studentId]||{}),
+    [type==='in' ? 'check_in_time' : 'check_out_time']: result.time
+  };
+  renderKioskStudentGrid();
 }
 
 // 홈 화면에 앱처럼 설치할 수 있도록 서비스워커 등록 (지원 안 하는 브라우저는 조용히 무시)
