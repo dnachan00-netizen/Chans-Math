@@ -98,7 +98,9 @@
   .g-att-time-card .g-att-value{font-size:19px;font-weight:800;color:var(--ink);font-family:var(--mono);}
   .g-att-time-card .g-att-value.empty-val{color:var(--ink-soft);font-family:var(--sans);font-size:13px;font-weight:600;}
 
-  /* 학부모 리포트 목록 — 오늘 것만 펼쳐지고 지난 리포트는 접힌 아코디언 */
+  /* 학부모 출결 기록 표는 컬럼이 적어서 전역 min-width:640px 규칙을 적용하지 않고 화면 폭에 맞춤 */
+  #gAttendanceBox table{min-width:0;width:100%;table-layout:fixed;}
+  #gAttendanceBox td, #gAttendanceBox th{word-break:keep-all;}
   .g-report-item{border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden;background:var(--panel);}
   .g-report-item summary{padding:14px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;list-style:none;}
   .g-report-item summary::-webkit-details-marker{display:none;}
@@ -735,9 +737,7 @@
     </section>
     <section id="gtab-info" class="tab-panel" style="display:none;">
       <div class="panel">
-        <h2 style="margin:0 0 16px;">출결 현황</h2>
-        <div class="stat-row" id="gAttStatRow"></div>
-        <div id="gAttTableWrap"></div>
+        <div id="gAttendanceBox"></div>
       </div>
       <div class="panel">
         <h2 style="margin:0 0 16px;">숙제 현황</h2>
@@ -2931,25 +2931,25 @@ function renderGuardianReports(){
 }
 
 function renderGuardianInfo(){
-  const total = guardianAttendance.length;
-  const present = guardianAttendance.filter(a=>a.status==='출석').length;
-  const late = guardianAttendance.filter(a=>a.status==='지각').length;
-  const absent = guardianAttendance.filter(a=>a.status==='결석').length;
-  document.getElementById('gAttStatRow').innerHTML = `
-    <div class="stat-card"><div class="label">전체 기록</div><div class="value">${total}건</div></div>
-    <div class="stat-card"><div class="label">출석</div><div class="value" style="color:var(--accent);">${present}건</div></div>
-    <div class="stat-card"><div class="label">지각</div><div class="value" style="color:var(--late);">${late}건</div></div>
-    <div class="stat-card"><div class="label">결석</div><div class="value" style="color:var(--warn);">${absent}건</div></div>`;
-
-  const attWrap = document.getElementById('gAttTableWrap');
-  if(guardianAttendance.length === 0){ attWrap.innerHTML = `<div class="empty">출결 기록이 없습니다.</div>`; }
-  else {
-    let html = `<table><thead><tr><th>날짜</th><th>출결 상태</th></tr></thead><tbody>`;
-    guardianAttendance.slice().sort((a,b)=>b.date.localeCompare(a.date)).forEach(a=>{
+  const attBox = document.getElementById('gAttendanceBox');
+  if(guardianAttendance.length === 0){
+    attBox.innerHTML = `<div class="empty" style="margin:0;">출결 기록이 없습니다.</div>`;
+  } else {
+    const sorted = guardianAttendance.slice().sort((a,b)=>b.date.localeCompare(a.date));
+    let rows = '';
+    sorted.forEach(a=>{
       const badgeClass = a.status==='출석'?'badge-present':a.status==='지각'?'badge-late':'badge-absent';
-      html += `<tr><td class="score-num">${fmtDate(a.date)}</td><td><span class="badge ${badgeClass}">${a.status}</span></td></tr>`;
+      rows += `<tr><td class="score-num">${fmtDate(a.date)}</td><td><span class="badge ${badgeClass}">${a.status}</span></td><td style="font-size:12.5px;color:var(--accent);">${a.makeup_date ? '보강 '+fmtDate(a.makeup_date) : '-'}</td></tr>`;
     });
-    attWrap.innerHTML = html + `</tbody></table>`;
+    attBox.innerHTML = `<details class="g-report-item">
+      <summary>
+        <span class="g-report-date">📅 출결 기록 (${sorted.length}건)</span>
+        <span class="g-report-toggle"></span>
+      </summary>
+      <div class="g-report-body" style="padding:0 0 12px;">
+        <table><thead><tr><th>날짜</th><th>출결 상태</th><th>보강</th></tr></thead><tbody>${rows}</tbody></table>
+      </div>
+    </details>`;
   }
 
   const hwWrap = document.getElementById('gHwListWrap');
