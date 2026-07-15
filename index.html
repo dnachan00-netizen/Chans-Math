@@ -91,6 +91,23 @@
   /* 학부모 화면 전용 강조색 (학생 화면과 시각적으로 구분되는 테라코타 계열) */
   #guardianView{ --accent:#b5583a; --accent-soft:#f6e6de; }
 
+  /* 학부모 첫 화면 상단 — 오늘 등하원 시각 카드 */
+  .g-att-time-row{display:flex;gap:10px;}
+  .g-att-time-card{flex:1;background:var(--accent-soft);border-radius:12px;padding:14px;text-align:center;}
+  .g-att-time-card .g-att-label{font-size:12px;color:var(--accent);font-weight:700;margin-bottom:4px;}
+  .g-att-time-card .g-att-value{font-size:19px;font-weight:800;color:var(--ink);font-family:var(--mono);}
+  .g-att-time-card .g-att-value.empty-val{color:var(--ink-soft);font-family:var(--sans);font-size:13px;font-weight:600;}
+
+  /* 학부모 리포트 목록 — 오늘 것만 펼쳐지고 지난 리포트는 접힌 아코디언 */
+  .g-report-item{border:1px solid var(--line);border-radius:12px;margin-bottom:12px;overflow:hidden;background:var(--panel);}
+  .g-report-item summary{padding:14px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;list-style:none;}
+  .g-report-item summary::-webkit-details-marker{display:none;}
+  .g-report-item summary .g-report-date{font-family:var(--mono);font-size:12px;color:var(--ink-soft);}
+  .g-report-item summary .g-report-toggle{font-size:12px;color:var(--accent);font-weight:700;white-space:nowrap;}
+  .g-report-item summary .g-report-toggle::after{content:'열기 ▾';}
+  .g-report-item[open] summary .g-report-toggle::after{content:'접기 ▴';}
+  .g-report-item .g-report-body{padding:0 16px 16px;white-space:pre-wrap;font-size:14px;line-height:1.6;}
+
   /* 여분 폰용 키오스크(등하원 체크인) 화면 — 로그인 없이 PIN으로만 접근 */
   #kioskView{position:fixed;inset:0;background:var(--paper);z-index:998;display:none;overflow-y:auto;}
   #kioskPinScreen{position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;z-index:999;}
@@ -708,6 +725,9 @@
     <div id="guardianChildSelectWrap"></div>
     <div id="guardianNoticeBanner" style="display:none;"></div>
     <section id="gtab-report" class="tab-panel">
+      <div class="panel">
+        <div id="gTodayAttendanceWrap"></div>
+      </div>
       <div class="panel">
         <h2 style="margin:0 0 16px;">일일 리포트</h2>
         <div id="gReportListWrap"></div>
@@ -2783,6 +2803,7 @@ async function refreshGuardianPortal(){
   renderGuardianChildSelect();
   await loadGuardianChildData();
   renderGuardianGreeting();
+  renderGuardianTodayAttendance();
   renderGuardianReports();
   renderGuardianInfo();
   await loadGuardianAnnouncements();
@@ -2814,6 +2835,7 @@ function renderGuardianChildSelect(){
     selectedGuardianChildId = e.target.value;
     await loadGuardianChildData();
     renderGuardianGreeting();
+    renderGuardianTodayAttendance();
     renderGuardianReports();
     renderGuardianInfo();
     renderGuardianNotices();
@@ -2845,6 +2867,37 @@ async function loadGuardianChildData(){
   );
 }
 
+// 오늘(한국 시간 기준) 등하원 시각을 첫 화면 맨 위 카드로 노출
+function renderGuardianTodayAttendance(){
+  const wrap = document.getElementById('gTodayAttendanceWrap');
+  if(!wrap) return;
+  const today = todayStr();
+  const att = guardianAttendance.find(a=>a.date===today);
+  const inTime = att && att.check_in_time ? fmtGuardianTime(att.check_in_time) : null;
+  const outTime = att && att.check_out_time ? fmtGuardianTime(att.check_out_time) : null;
+
+  if(!inTime && !outTime){
+    wrap.innerHTML = `<div class="empty" style="margin:0;">오늘은 아직 등원 소식이 없어요.</div>`;
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="g-att-time-row">
+      <div class="g-att-time-card">
+        <div class="g-att-label">🚪 등원</div>
+        <div class="g-att-value ${inTime?'':'empty-val'}">${inTime || '아직 없음'}</div>
+      </div>
+      <div class="g-att-time-card">
+        <div class="g-att-label">🏠 하원</div>
+        <div class="g-att-value ${outTime?'':'empty-val'}">${outTime || '아직 없음'}</div>
+      </div>
+    </div>`;
+}
+
+function fmtGuardianTime(iso){
+  if(!iso) return '';
+  return new Date(iso).toLocaleTimeString('ko-KR', { hour:'numeric', minute:'2-digit' });
+}
+
 function renderGuardianGreeting(){
   const el = document.getElementById('guardianGreeting');
   const child = guardianChildren.find(c=>c.id===selectedGuardianChildId);
@@ -2856,17 +2909,23 @@ function renderGuardianGreeting(){
     <div class="sg-sub">${dateStr} · ${escapeHtml(child.class_time)||'반 미배정'}</div>`;
 }
 
+// 오늘 리포트는 펼쳐진 상태로, 지난 리포트는 접힌 상태(탭하면 펼쳐짐)로 노출
 function renderGuardianReports(){
   const wrap = document.getElementById('gReportListWrap');
   const withText = guardianReports.filter(log => log.composed_report || log.lesson_content);
   if(withText.length === 0){ wrap.innerHTML = `<div class="empty">아직 등록된 리포트가 없습니다.</div>`; return; }
+  const today = todayStr();
   let html = '';
   withText.forEach(log=>{
     const text = log.composed_report || log.lesson_content;
-    html += `<div class="hw-card" style="border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;">
-      <div style="font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin-bottom:8px;">${fmtDate(log.note_date)}</div>
-      <div style="white-space:pre-wrap;font-size:14px;line-height:1.6;">${escapeHtml(text)}</div>
-    </div>`;
+    const isToday = log.note_date === today;
+    html += `<details class="g-report-item" ${isToday ? 'open' : ''}>
+      <summary>
+        <span class="g-report-date">${fmtDate(log.note_date)}${isToday ? ' · 오늘' : ''}</span>
+        <span class="g-report-toggle"></span>
+      </summary>
+      <div class="g-report-body">${escapeHtml(text)}</div>
+    </details>`;
   });
   wrap.innerHTML = html;
 }
