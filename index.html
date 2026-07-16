@@ -547,6 +547,11 @@
         </div>
       </div>
       <p class="desc">날짜와 반을 고르면, 그날 그 반 학생들의 수업일지를 바로 조회·수정할 수 있습니다. 홈 화면에서 작성한 내용과 동일한 기록을 씁니다.</p>
+      <details style="margin:0 0 16px;">
+        <summary style="cursor:pointer;font-size:13.5px;color:var(--ink-soft);">⚙️ 반별 학부모 푸시 발송 시간 설정</summary>
+        <p class="desc" style="margin-top:8px;">반마다 학부모 앱 푸시를 보낼 시간을 정해두면, 그 반 학생의 수업일지가 저장돼도 정해둔 시간이 될 때까지 기다렸다가 한 번에 보냅니다. 시간을 비워두면 수업일지를 저장하는 즉시 보냅니다.</p>
+        <div id="classPushSettingsWrap"></div>
+      </details>
       <div id="classLogClassButtons"></div>
     </div>
     <div class="panel" id="classLogStudentsPanel" style="display:none;">
@@ -2015,6 +2020,9 @@ async function renderHomeStudentList(){
    날짜를 자유롭게 선택해서 지난 수업일지도 조회·수정할 수 있게 함.
 ========================================================= */
 
+let classPushSettings = {}; // { [class_time]: 'HH:MM' | null }
+let classPushSettingsLoaded = false;
+
 function renderClassLogTab(){
   if(!classLogSelectedDate) classLogSelectedDate = todayStr();
   document.getElementById('classLogDateInput').value = classLogSelectedDate;
@@ -2022,6 +2030,52 @@ function renderClassLogTab(){
   renderClassLogClassButtons();
   if(classLogSelectedClass !== null) renderClassLogStudentList();
   else document.getElementById('classLogStudentsPanel').style.display = 'none';
+  if(!classPushSettingsLoaded){ loadAndRenderClassPushSettings(); }
+}
+
+async function loadAndRenderClassPushSettings(){
+  const { data, error } = await sb.from('class_push_settings').select('*');
+  if(!error){
+    classPushSettings = {};
+    (data || []).forEach(row=>{ classPushSettings[row.class_time] = row.push_time ? row.push_time.slice(0,5) : null; });
+    classPushSettingsLoaded = true;
+  }
+  renderClassPushSettings();
+}
+
+function renderClassPushSettings(){
+  const wrap = document.getElementById('classPushSettingsWrap');
+  if(!wrap) return;
+  const groups = {'월목':[], '화금':[], '토일':[]};
+  CLASS_LIST.forEach(ct=>{ groups[ct.split(' ')[0]].push(ct); });
+
+  let html = '';
+  Object.keys(groups).forEach(prefix=>{
+    html += `<div class="home-group-label">${prefix}요일반</div>`;
+    groups[prefix].forEach(ct=>{
+      const val = classPushSettings[ct] || '';
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);">
+        <span style="min-width:110px;font-size:13.5px;color:var(--ink);">${ct}</span>
+        <input type="time" id="classPushTime_${ct.replace(/\s/g,'_')}" value="${val}" style="max-width:130px;" onchange="saveClassPushTime('${ct}', this.value)">
+        <span style="font-size:12px;color:var(--ink-soft);">${val ? '' : '설정 안 함 · 저장 즉시 발송'}</span>
+      </div>`;
+    });
+  });
+  wrap.innerHTML = html;
+}
+
+async function saveClassPushTime(classTime, value){
+  if(!value){
+    // 시간을 비우면 설정을 아예 지워서 "즉시 발송"으로 되돌림
+    const { error } = await sb.from('class_push_settings').delete().eq('class_time', classTime);
+    if(error){ alert('저장 실패: '+error.message); return; }
+    delete classPushSettings[classTime];
+  } else {
+    const { error } = await sb.from('class_push_settings').upsert({ class_time: classTime, push_time: value }, { onConflict: 'class_time' });
+    if(error){ alert('저장 실패: '+error.message); return; }
+    classPushSettings[classTime] = value;
+  }
+  renderClassPushSettings();
 }
 
 function updateClassLogTodayBtnState(){
