@@ -624,6 +624,16 @@
     <div class="panel">
       <h2>숙제 내주기</h2>
       <p class="desc">반 전체에 내주거나, 특정 학생 한 명에게만 개별로 낼 수 있습니다.</p>
+
+      <div style="background:#fcfcfb;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px;">
+        <label style="margin-bottom:8px;">교재 페이지 빠른 입력 <span style="font-weight:400;color:var(--ink-soft);font-size:12px;">(교재 번호 + 페이지를 넣으면 제목·내용을 자동으로 만들어줘요)</span></label>
+        <div id="hwBookRows"></div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addHwBookRow()">+ 교재 추가</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="applyHwBookRows()">제목·내용에 적용</button>
+        </div>
+      </div>
+
       <div class="grid-form">
         <div>
           <label>제목</label>
@@ -2479,6 +2489,66 @@ document.getElementById('hwFilterStudent').addEventListener('change', renderHwLi
 document.getElementById('hwFilterKeyword').addEventListener('input', renderHwList);
 document.getElementById('hwFilterStatus').addEventListener('change', renderHwList);
 
+let hwBookRows = [{idx:1, num:1, range:''}];
+let hwBookRowSeq = 2;
+
+function renderHwBookRows(){
+  const wrap = document.getElementById('hwBookRows');
+  if(!wrap) return;
+  wrap.innerHTML = hwBookRows.map(r => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <input type="number" min="1" value="${r.num}" style="max-width:64px;" onchange="updateHwBookRow(${r.idx},'num',this.value)">
+      <span style="color:var(--ink-soft);font-size:13px;white-space:nowrap;">번 교재</span>
+      <input type="text" value="${escapeHtml(r.range)}" placeholder="예: 26-29" style="flex:1;" onchange="updateHwBookRow(${r.idx},'range',this.value)">
+      <span style="color:var(--ink-soft);font-size:13px;">쪽</span>
+      ${hwBookRows.length > 1 ? `<button type="button" class="btn btn-ghost btn-sm" onclick="removeHwBookRow(${r.idx})">삭제</button>` : ''}
+    </div>`).join('');
+}
+
+function addHwBookRow(){
+  hwBookRows.push({idx:hwBookRowSeq++, num:hwBookRows.length+1, range:''});
+  renderHwBookRows();
+}
+
+function removeHwBookRow(idx){
+  hwBookRows = hwBookRows.filter(r => r.idx !== idx);
+  renderHwBookRows();
+}
+
+function updateHwBookRow(idx, field, value){
+  const row = hwBookRows.find(r => r.idx === idx);
+  if(row) row[field] = value;
+}
+
+function resetHwBookRows(){
+  hwBookRows = [{idx:1, num:1, range:''}];
+  hwBookRowSeq = 2;
+  renderHwBookRows();
+}
+
+function applyHwBookRows(){
+  const filled = hwBookRows.filter(r => String(r.range).trim() !== '');
+  if(!filled.length){ alert('페이지를 하나 이상 입력해 주세요.'); return; }
+  const lines = filled.map(r => `· ${r.num}번 교재 ${String(r.range).trim().replace(/-/g,'~')}쪽`);
+  const titleSelect = document.getElementById('hwTitleSelect');
+  const titleCustom = document.getElementById('hwTitleCustom');
+  if(filled.length === 1){
+    titleSelect.value = '__custom__';
+    titleCustom.style.display = 'block';
+    titleCustom.value = `${filled[0].num}번 교재 ${String(filled[0].range).trim().replace(/-/g,'~')}쪽`;
+  } else {
+    titleSelect.value = '__custom__';
+    titleCustom.style.display = 'block';
+    titleCustom.value = `교재 숙제 (${filled.length}건)`;
+  }
+  if(filled.length > 1){
+    const descBox = document.getElementById('hwDesc');
+    descBox.value = lines.join('\n');
+  }
+}
+
+renderHwBookRows();
+
 document.getElementById('hwTitleSelect').addEventListener('change', ()=>{
   const isCustom = document.getElementById('hwTitleSelect').value === '__custom__';
   const customInput = document.getElementById('hwTitleCustom');
@@ -2533,6 +2603,7 @@ document.getElementById('addHwBtn').addEventListener('click', async ()=>{
   document.getElementById('hwDesc').value='';
   document.getElementById('hwClassTime').value=''; document.getElementById('hwStudent').value='';
   document.getElementById('hwSendKakao').checked = true;
+  resetHwBookRows();
   if(fileInput) fileInput.value = '';
   addBtn.disabled = false; addBtn.textContent = '숙제 등록하기';
   await loadAssignmentsAndSubmissions();
