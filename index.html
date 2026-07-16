@@ -401,6 +401,16 @@
   #loginMsg{margin-top:12px;font-size:13px;color:var(--warn);min-height:18px;}
   #loginBox button{width:100%;margin-top:18px;}
   #appRoot{display:none;}
+  .hs-log-actions{display:flex;gap:8px;margin-top:4px;}
+  .hs-log-actions .btn{flex:1;}
+  @media (max-width:600px){
+    .hs-log-actions{position:sticky;bottom:0;background:#fcfcfb;margin:6px -10px -10px;padding:8px 10px calc(8px + env(safe-area-inset-bottom));border-top:1px solid var(--line);z-index:5;}
+    .hs-actions{gap:6px;}
+    .hs-actions button.btn-sm{padding:10px 14px;font-size:13.5px;min-height:40px;}
+    .segmented4 button{padding:12px 4px;font-size:13px;min-height:42px;}
+    .home-class-btn{padding:16px 14px;}
+    .att-quick-btn{min-height:38px;}
+  }
 </style>
 </head>
 <body>
@@ -1876,8 +1886,10 @@ async function renderHomeStudentList(){
 
         <div class="cl-prev-rate" style="margin:6px 0;">${computePrevHomeworkRate(s.id)}</div>
         <div class="cl-report-preview" id="hsLogPreview_${s.id}"></div>
-        <button class="btn btn-primary btn-sm" onclick="saveQuickClassLog('${s.id}')">저장 + 미리보기</button>
-        <button class="btn btn-ghost btn-sm" onclick="toggleClassLogInline('${s.id}')">취소</button>
+        <div class="hs-log-actions">
+          <button class="btn btn-primary btn-sm" onclick="saveQuickClassLog('${s.id}')">저장 + 미리보기</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleClassLogInline('${s.id}')">취소</button>
+        </div>
       </div>
     </div>`;
   });
