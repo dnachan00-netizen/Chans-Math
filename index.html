@@ -2409,21 +2409,26 @@ function formatHwShorthand(raw){
   };
 }
 
-// 수업일지 "수업 내용"에 "1.110-125" 같은 축약형을 쓰면, 그 학생의 1번 슬롯에 지정된 교재명을 찾아
-// 리포트에는 "1번 교재(큐브개념 6-2) 110~125쪽"처럼 풀어서 나가도록 확장.
+// 수업일지 "수업 내용"에 "1.110-125" 같은 축약형을 쓰면, 그 학생의 1번 슬롯에 지정된 교재명+현재 단원명을 찾아
+// 리포트에는 "1번 교재(큐브개념 6-2 · 3단원 분수의 나눗셈) 110~125쪽"처럼 풀어서 나가도록 확장.
 // lesson_content 저장값 자체(축약형 원문)는 건드리지 않음 — 리포트 조합 시에만 이 확장된 텍스트를 사용.
 async function expandLessonContentForReport(studentId, raw){
   const parsed = parseBookShorthand(raw);
   if(!parsed.ok) return raw;
 
-  const { data } = await sb.from('student_progress').select('slot_num, textbook_name')
+  await ensureCurriculumMapLoaded();
+  const { data } = await sb.from('student_progress').select('slot_num, textbook_name, current_unit_order')
     .eq('student_id', studentId);
-  const nameBySlot = {};
-  (data || []).forEach(r => { if(r.textbook_name) nameBySlot[r.slot_num] = r.textbook_name; });
+  const progressBySlot = {};
+  (data || []).forEach(r => { if(r.textbook_name) progressBySlot[r.slot_num] = r; });
 
   const bookText = b => {
-    const name = nameBySlot[parseInt(b.num, 10)];
-    const label = name ? `${b.num}번 교재(${name})` : `${b.num}번 교재`;
+    const prog = progressBySlot[parseInt(b.num, 10)];
+    let label = `${b.num}번 교재`;
+    if(prog){
+      const unit = prog.current_unit_order ? curriculumUnitsFor(prog.textbook_name).find(u => u.unit_order === prog.current_unit_order) : null;
+      label += unit ? `(${prog.textbook_name} · ${unit.unit_order}단원 ${unit.unit_name})` : `(${prog.textbook_name})`;
+    }
     return `${label} ${b.ranges.join(', ').replace(/-/g,'~')}쪽`;
   };
   return parsed.books.map(bookText).join(', ');
