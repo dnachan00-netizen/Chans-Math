@@ -518,6 +518,8 @@
   <button class="tab-btn" data-tab="announcements"><span class="num">05</span>공지사항</button>
   <button class="tab-btn" data-tab="attendance"><span class="num">06</span>출결 관리</button>
   <button class="tab-btn" data-tab="students"><span class="num">07</span>학생 명단</button>
+  <button class="tab-btn" data-tab="curriculum"><span class="num">08</span>교재</button>
+  <button id="sidebarOrderEditBtn" onclick="openTabOrderEditor()" style="margin-top:10px;padding:10px 24px;background:transparent;border:none;border-top:1px solid rgba(255,255,255,0.08);color:#9a9cb0;font-size:12.5px;cursor:pointer;text-align:left;font-family:var(--sans);">≡ 메뉴 순서 편집</button>
 </nav>
 
 <div class="content-area">
@@ -556,6 +558,17 @@
     </div>
     <div class="panel" id="classLogStudentsPanel" style="display:none;">
       <div id="classLogStudents"></div>
+    </div>
+  </section>
+
+  <section id="tab-curriculum" class="tab-panel" style="display:none;">
+    <div class="panel">
+      <h2 style="margin:0 0 6px;">교재</h2>
+      <p class="desc">반을 고르면 그 반 학생들의 교재·단원 배정을 한 화면에서 확인하고 바로 바꿀 수 있습니다. 새 교재 목차 등록은 목차 사진을 보내주시면 이어서 처리해드립니다.</p>
+      <div id="curriculumClassButtons"></div>
+    </div>
+    <div class="panel" id="curriculumStudentsPanel" style="display:none;">
+      <div id="curriculumStudents"></div>
     </div>
   </section>
 
@@ -945,6 +958,15 @@
   </div>
 </div>
 
+<div id="tabOrderOverlay" style="position:fixed;inset:0;background:rgba(27,35,64,0.55);display:none;align-items:flex-start;justify-content:center;z-index:1000;padding:40px 16px;overflow-y:auto;">
+  <div style="background:var(--panel);border-radius:16px;max-width:380px;width:100%;padding:24px;position:relative;">
+    <button class="closeBtn" onclick="closeTabOrderEditor()" style="position:absolute;top:14px;right:16px;background:transparent;border:none;font-size:20px;cursor:pointer;color:var(--ink-soft);">✕</button>
+    <h3 style="margin:0 0 4px;">메뉴 순서 편집</h3>
+    <p class="desc" style="margin:0 0 14px;">▲▼로 순서를 바꾸면 바로 저장됩니다. 이 컴퓨터(브라우저)에만 적용됩니다.</p>
+    <div id="tabOrderList"></div>
+  </div>
+</div>
+
 <script>
 const SUPABASE_URL = "https://vbfaagduyttzyfefstaf.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_mtCBDdGUfEqJqxU_8sJmbg_gjUrnKru";
@@ -1231,6 +1253,7 @@ async function enterApp(session){
     document.getElementById('studentView').style.display = 'none';
     document.getElementById('guardianView').style.display = 'none';
     document.getElementById('whoLabel').textContent = session.user.email;
+    applySidebarOrder();
     await refreshAll();
     await loadAssignmentsAndSubmissions();
     renderHwList();
@@ -1304,6 +1327,7 @@ document.querySelectorAll('#staffView .tab-btn').forEach(btn=>{
     if(btn.dataset.tab==='home') renderHomeTab();
     if(btn.dataset.tab==='classlog') renderClassLogTab();
     if(btn.dataset.tab==='announcements') renderAnnouncementsTab();
+    if(btn.dataset.tab==='curriculum') renderCurriculumTab();
   });
 });
 
@@ -1688,7 +1712,7 @@ async function renderStudentProgressPanel(studentId){
   if(error){ wrap.innerHTML = `<div class="empty">불러오기 실패: ${escapeHtml(error.message)}</div>`; return; }
 
   detailProgressRows = (data && data.length) ? data
-    : [{ slot_num:1, textbook_name:null, current_unit_order:null, last_completed_point:null, clinic_pending:false }];
+    : [{ slot_num:1, textbook_name:null, current_unit_order:null, last_completed_point:null, clinic_pending:false, unit_status:null, unit_started_at:null }];
   renderProgressRows(studentId);
 }
 
@@ -1704,52 +1728,57 @@ function renderProgressRows(studentId){
   wrap.innerHTML = html;
 }
 
-function progressRowHtml(studentId, row, textbookOptions){
+function progressRowHtml(studentId, row, textbookOptions, idPrefix){
+  idPrefix = idPrefix || 'prog';
   const units = row.textbook_name ? curriculumUnitsFor(row.textbook_name) : [];
+  const statusLabel = row.unit_status ? ` · ${row.unit_status}${row.unit_started_at ? ' ('+fmtDate(row.unit_started_at)+'부터)' : ''}` : '';
   return `
     <div class="progress-slot" style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;">
       <div style="font-weight:600;margin-bottom:8px;">${row.slot_num}번 교재</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <select id="progTextbook_${studentId}_${row.slot_num}" onchange="onProgressTextbookChange('${studentId}', ${row.slot_num})">
+        <select id="${idPrefix}Textbook_${studentId}_${row.slot_num}" onchange="onProgressTextbookChange('${studentId}', ${row.slot_num}, '${idPrefix}')">
           <option value="">교재 선택 안 함</option>
           ${textbookOptions.map(n=>`<option value="${escapeHtml(n)}" ${n===row.textbook_name?'selected':''}>${escapeHtml(n)}</option>`).join('')}
         </select>
-        <select id="progUnit_${studentId}_${row.slot_num}">
+        <select id="${idPrefix}Unit_${studentId}_${row.slot_num}">
           <option value="">단원 선택</option>
           ${units.map(u=>`<option value="${u.unit_order}" ${u.unit_order===row.current_unit_order?'selected':''}>${u.unit_order}. ${escapeHtml(u.unit_name)}</option>`).join('')}
         </select>
-        <button class="btn btn-primary btn-sm" onclick="saveStudentProgressSlot('${studentId}', ${row.slot_num})">저장</button>
+        <button class="btn btn-primary btn-sm" onclick="saveStudentProgressSlot('${studentId}', ${row.slot_num}, '${idPrefix}')">저장</button>
       </div>
       <div class="sub" style="margin-top:8px;font-size:12.5px;color:var(--ink-soft);">
-        최근 숙제 기록(자동): ${row.last_completed_point ? escapeHtml(row.last_completed_point)+'쪽' : '기록 없음'}${row.clinic_pending ? ' · <span style="color:#b3452e;">클리닉 필요</span>' : ''}
+        최근 숙제 기록(자동): ${row.last_completed_point ? escapeHtml(row.last_completed_point)+'쪽' : '기록 없음'}${row.clinic_pending ? ' · <span style="color:#b3452e;">클리닉 필요</span>' : ''}${statusLabel}
       </div>
     </div>`;
 }
 
 // 교재 선택이 바뀌면, 그 교재의 단원 목록으로 단원 드롭다운을 다시 채움
-function onProgressTextbookChange(studentId, slotNum){
-  const textbookSelect = document.getElementById(`progTextbook_${studentId}_${slotNum}`);
-  const unitSelect = document.getElementById(`progUnit_${studentId}_${slotNum}`);
+function onProgressTextbookChange(studentId, slotNum, idPrefix){
+  idPrefix = idPrefix || 'prog';
+  const textbookSelect = document.getElementById(`${idPrefix}Textbook_${studentId}_${slotNum}`);
+  const unitSelect = document.getElementById(`${idPrefix}Unit_${studentId}_${slotNum}`);
   const units = textbookSelect.value ? curriculumUnitsFor(textbookSelect.value) : [];
   unitSelect.innerHTML = `<option value="">단원 선택</option>` +
     units.map(u=>`<option value="${u.unit_order}">${u.unit_order}. ${escapeHtml(u.unit_name)}</option>`).join('');
 }
 
-// 비어있는 슬롯 하나를 화면에 추가 (저장 버튼을 눌러야 실제 DB에 반영됨)
+// 비어있는 슬롯 하나를 화면에 추가 (저장 버튼을 눌러야 실제 DB에 반영됨) — 학생 상세보기 모달 전용
 function addProgressSlot(studentId){
   const usedSlots = detailProgressRows.map(r=>r.slot_num);
   let next = 1;
   while(usedSlots.includes(next)) next++;
-  detailProgressRows.push({ slot_num: next, textbook_name:null, current_unit_order:null, last_completed_point:null, clinic_pending:false });
+  detailProgressRows.push({ slot_num: next, textbook_name:null, current_unit_order:null, last_completed_point:null, clinic_pending:false, unit_status:null, unit_started_at:null });
   renderProgressRows(studentId);
 }
 
 // 슬롯 하나(교재명 + 현재 단원)를 student_progress에 저장
 // last_completed_point / recent_wrong_count / clinic_pending은 여기서 건드리지 않음
 // (숙제 빠른입력 쪽 자동 기록 로직과 분리되어 있어야 서로 덮어쓰지 않음)
-async function saveStudentProgressSlot(studentId, slotNum){
-  const textbookSelect = document.getElementById(`progTextbook_${studentId}_${slotNum}`);
-  const unitSelect = document.getElementById(`progUnit_${studentId}_${slotNum}`);
+// idPrefix로 호출 화면을 구분해서, 저장 후 갱신할 rows 캐시를 올바르게 찾아감(모달=detailProgressRows, 교재 탭=curriculumProgressRows)
+async function saveStudentProgressSlot(studentId, slotNum, idPrefix){
+  idPrefix = idPrefix || 'prog';
+  const textbookSelect = document.getElementById(`${idPrefix}Textbook_${studentId}_${slotNum}`);
+  const unitSelect = document.getElementById(`${idPrefix}Unit_${studentId}_${slotNum}`);
   const textbookName = textbookSelect.value || null;
   const unitOrder = unitSelect.value ? parseInt(unitSelect.value, 10) : null;
 
@@ -1763,9 +1792,188 @@ async function saveStudentProgressSlot(studentId, slotNum){
   }, { onConflict: 'student_id,slot_num' });
   if(error){ alert('저장 실패: ' + error.message); return; }
 
-  const row = detailProgressRows.find(r=>r.slot_num===slotNum);
+  const rows = idPrefix === 'cur' ? (curriculumProgressRows[studentId] || []) : detailProgressRows;
+  const row = rows.find(r=>r.slot_num===slotNum);
   if(row){ row.textbook_name = textbookName; row.current_unit_order = unitOrder; row.unit_status = '진행중'; row.unit_started_at = todayStr(); }
+  if(idPrefix === 'cur') renderCurriculumStudentBlock(studentId);
   alert(`${slotNum}번 교재 진도가 저장되었습니다.`);
+}
+
+// ── 사이드바 메뉴 순서 편집 (이 브라우저에만 저장, localStorage) ──────────────────
+// 기존 탭 목록에 없는 값은 무시하고, 저장된 순서에 없는 새 탭(향후 추가분)은 자동으로 맨 뒤에 붙음
+// → 나중에 탭이 추가/삭제돼도 저장된 순서가 깨지지 않고 자연스럽게 이어짐
+const DEFAULT_TAB_ORDER = ['home','classlog','homework','counseling','scores','announcements','attendance','students','curriculum'];
+const TAB_LABELS = {
+  home:'홈', classlog:'수업일지', homework:'숙제 관리', counseling:'상담 일지',
+  scores:'성적 관리', announcements:'공지사항', attendance:'출결 관리',
+  students:'학생 명단', curriculum:'교재'
+};
+
+function getTabOrder(){
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('staffTabOrder') || 'null'); } catch(e){}
+  if(!Array.isArray(saved)) return DEFAULT_TAB_ORDER.slice();
+  const valid = saved.filter(t => DEFAULT_TAB_ORDER.includes(t));
+  const missing = DEFAULT_TAB_ORDER.filter(t => !valid.includes(t));
+  return [...valid, ...missing];
+}
+
+function saveTabOrder(order){
+  try { localStorage.setItem('staffTabOrder', JSON.stringify(order)); } catch(e){ /* 저장 불가 환경이면 이번 세션만 순서 적용, 새로고침 시 기본값으로 */ }
+}
+
+// 저장된 순서대로 사이드바 버튼들을 실제로 재배치하고, 화면에 보이는 번호(00,01,...)도 새 순서에 맞게 갱신
+function applySidebarOrder(){
+  const nav = document.querySelector('#staffView nav.sidebar');
+  if(!nav) return;
+  const order = getTabOrder();
+  order.forEach((tabName, idx) => {
+    const btn = nav.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+    if(!btn) return;
+    nav.appendChild(btn); // 순서대로 다시 appendChild하면 그 순서로 재배치됨
+    const numSpan = btn.querySelector('.num');
+    if(numSpan) numSpan.textContent = String(idx).padStart(2,'0');
+  });
+  const orderBtn = document.getElementById('sidebarOrderEditBtn');
+  if(orderBtn) nav.appendChild(orderBtn); // "메뉴 순서 편집" 버튼은 항상 맨 아래
+}
+
+function openTabOrderEditor(){
+  renderTabOrderList();
+  document.getElementById('tabOrderOverlay').style.display = 'flex';
+}
+function closeTabOrderEditor(){
+  document.getElementById('tabOrderOverlay').style.display = 'none';
+}
+document.getElementById('tabOrderOverlay').addEventListener('click', (e)=>{
+  if(e.target.id === 'tabOrderOverlay') closeTabOrderEditor();
+});
+
+function renderTabOrderList(){
+  const wrap = document.getElementById('tabOrderList');
+  const order = getTabOrder();
+  wrap.innerHTML = order.map((tabName, idx) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);">
+      <span>${TAB_LABELS[tabName] || tabName}</span>
+      <div style="display:flex;gap:4px;">
+        <button class="btn btn-ghost btn-sm" ${idx===0?'disabled':''} onclick="moveTabOrder('${tabName}',-1)">▲</button>
+        <button class="btn btn-ghost btn-sm" ${idx===order.length-1?'disabled':''} onclick="moveTabOrder('${tabName}',1)">▼</button>
+      </div>
+    </div>`).join('');
+}
+
+function moveTabOrder(tabName, delta){
+  const order = getTabOrder();
+  const idx = order.indexOf(tabName);
+  const newIdx = idx + delta;
+  if(newIdx < 0 || newIdx >= order.length) return;
+  [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
+  saveTabOrder(order);
+  applySidebarOrder();
+  renderTabOrderList();
+}
+
+// ── 교재 탭: 반 단위로 여러 학생의 슬롯을 한 화면에서 편집 ──────────────────
+let curriculumTabSelectedClass = null;
+let curriculumProgressRows = {}; // studentId -> student_progress rows[] (교재 탭 화면 전용 캐시)
+
+async function renderCurriculumTab(){
+  await ensureCurriculumMapLoaded();
+  renderCurriculumClassButtons();
+  if(curriculumTabSelectedClass !== null) await renderCurriculumStudentList();
+  else document.getElementById('curriculumStudentsPanel').style.display = 'none';
+}
+
+// renderHomeClassButtons()/renderClassLogClassButtons()와 같은 구조 — 반 선택 상태만 교재 탭 전용으로 분리
+function renderCurriculumClassButtons(){
+  const wrap = document.getElementById('curriculumClassButtons');
+  const groups = {'월목':[], '화금':[], '토일':[]};
+  CLASS_LIST.forEach(ct=>{
+    const prefix = ct.split(' ')[0];
+    const count = students.filter(s=>s.class_time===ct && isActiveStudent(s)).length;
+    groups[prefix].push({ct, count});
+  });
+
+  const renderGroupButtons = (list) => list.map(g=>`
+    <button class="home-class-btn${curriculumTabSelectedClass===g.ct?' selected':''}" onclick="selectCurriculumClass('${g.ct}')">
+      <span class="hc-time">${g.ct.split(' ')[1]}</span>
+      <span class="hc-count">${g.count}명</span>
+    </button>`).join('');
+
+  let html = `<div class="home-class-grid">`;
+  Object.keys(groups).forEach(prefix=>{ html += renderGroupButtons(groups[prefix]); });
+  html += `</div>`;
+
+  const unassigned = students.filter(s=>!s.class_time && isActiveStudent(s));
+  if(unassigned.length){
+    html += `<div class="home-group-label">반 미배정</div><div class="home-class-grid">
+      <button class="home-class-btn${curriculumTabSelectedClass===''?' selected':''}" onclick="selectCurriculumClass('')">
+        <span class="hc-time">미배정</span><span class="hc-count">${unassigned.length}명</span>
+      </button>
+    </div>`;
+  }
+  wrap.innerHTML = html;
+}
+
+async function selectCurriculumClass(classTime){
+  curriculumTabSelectedClass = classTime;
+  renderCurriculumClassButtons();
+  await renderCurriculumStudentList();
+}
+
+// 선택된 반 학생들의 student_progress를 한 번에 불러와서 학생별로 나눠 캐시해두고, 학생마다 슬롯 편집 블록을 렌더링
+async function renderCurriculumStudentList(){
+  const classTime = curriculumTabSelectedClass;
+  const list = classTime ? students.filter(s=>s.class_time===classTime && isActiveStudent(s)) : students.filter(s=>!s.class_time && isActiveStudent(s));
+  const panel = document.getElementById('curriculumStudentsPanel');
+  const wrap = document.getElementById('curriculumStudents');
+  panel.style.display = 'block';
+  if(!list.length){ wrap.innerHTML = `<div class="empty">이 반에 등록된 학생이 없습니다.</div>`; return; }
+
+  wrap.innerHTML = '불러오는 중...';
+  const { data, error } = await sb.from('student_progress').select('*')
+    .in('student_id', list.map(s=>s.id)).order('slot_num');
+  if(error){ wrap.innerHTML = `<div class="empty">불러오기 실패: ${escapeHtml(error.message)}</div>`; return; }
+
+  curriculumProgressRows = {};
+  list.forEach(s=>{
+    const rows = (data||[]).filter(r=>r.student_id===s.id).sort((a,b)=>a.slot_num-b.slot_num);
+    curriculumProgressRows[s.id] = rows.length ? rows
+      : [{ slot_num:1, textbook_name:null, current_unit_order:null, last_completed_point:null, clinic_pending:false, unit_status:null, unit_started_at:null }];
+  });
+
+  wrap.innerHTML = list.map(s => `
+    <div class="curriculum-student-block" style="border-bottom:1px solid var(--line);padding:14px 0;">
+      <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(s.name)}</div>
+      <div id="curProgWrap_${s.id}"></div>
+    </div>`).join('');
+
+  list.forEach(s => renderCurriculumStudentBlock(s.id));
+}
+
+function renderCurriculumStudentBlock(studentId){
+  const wrap = document.getElementById(`curProgWrap_${studentId}`);
+  if(!wrap) return;
+  const textbookOptions = curriculumTextbookNames();
+  if(!textbookOptions.length){
+    wrap.innerHTML = `<div class="empty">등록된 교재 목차(curriculum_map)가 없습니다. 목차 사진을 보내주시면 등록해드리겠습니다.</div>`;
+    return;
+  }
+  const rows = curriculumProgressRows[studentId] || [];
+  let html = rows.map(row => progressRowHtml(studentId, row, textbookOptions, 'cur')).join('');
+  html += `<button class="btn btn-ghost btn-sm" style="margin-top:4px;" onclick="addCurriculumProgressSlot('${studentId}')">+ 슬롯 추가</button>`;
+  wrap.innerHTML = html;
+}
+
+// 비어있는 슬롯 하나를 이 학생 블록에 추가 (저장 버튼을 눌러야 실제 DB에 반영됨) — 교재 탭 전용
+function addCurriculumProgressSlot(studentId){
+  const rows = curriculumProgressRows[studentId] || [];
+  const usedSlots = rows.map(r=>r.slot_num);
+  let next = 1;
+  while(usedSlots.includes(next)) next++;
+  rows.push({ slot_num: next, textbook_name:null, current_unit_order:null, last_completed_point:null, clinic_pending:false, unit_status:null, unit_started_at:null });
+  curriculumProgressRows[studentId] = rows;
+  renderCurriculumStudentBlock(studentId);
 }
 
 function renderDetailCalendar(){
