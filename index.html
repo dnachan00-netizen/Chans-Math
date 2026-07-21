@@ -928,6 +928,10 @@
       <h3>교재 진도</h3>
       <p class="sub" style="margin-top:-4px;margin-bottom:12px;">학생이 지금 몇 번 교재로 어느 단원까지 나갔는지 설정합니다. 여기서 지정해 두면 숙제 빠른입력에서 "다음 구간"을 자동으로 찾아줄 수 있습니다.</p>
       <div id="detailProgressWrap">불러오는 중...</div>
+      <div style="margin-top:14px;">
+        <button class="btn btn-ghost btn-sm" onclick="toggleProgressHistory(editingStudentId)">지난 교재 보기</button>
+        <div id="detailProgressHistoryWrap" style="display:none;margin-top:10px;"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -1724,6 +1728,41 @@ async function addTitleOnlyTextbook(){
   alert(`"${title}" 교재가 등록되었습니다. 학생 배정 드롭다운에서 바로 선택하실 수 있어요.`);
 }
 
+// "지난 교재 보기" 토글 — 처음 열 때만 조회하고, 이후엔 열고 닫기만 함
+let progressHistoryLoadedFor = null;
+async function toggleProgressHistory(studentId){
+  const box = document.getElementById('detailProgressHistoryWrap');
+  const isOpen = box.style.display !== 'none';
+  if(isOpen){ box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  if(progressHistoryLoadedFor === studentId) return; // 이미 이 학생 기록을 불러온 상태면 재조회 안 함
+  await renderProgressHistory(studentId);
+  progressHistoryLoadedFor = studentId;
+}
+
+async function renderProgressHistory(studentId){
+  const box = document.getElementById('detailProgressHistoryWrap');
+  box.innerHTML = '불러오는 중...';
+  await ensureCurriculumMapLoaded();
+
+  const { data, error } = await sb.from('student_progress_history').select('*')
+    .eq('student_id', studentId).order('ended_at', { ascending: false });
+  if(error){ box.innerHTML = `<div class="empty">불러오기 실패: ${escapeHtml(error.message)}</div>`; return; }
+  if(!data || !data.length){ box.innerHTML = `<div class="empty">아직 지난 교재 기록이 없습니다.</div>`; return; }
+
+  box.innerHTML = data.map(row=>{
+    const units = curriculumUnitsFor(row.textbook_name);
+    const unit = row.last_unit_order ? units.find(u=>u.unit_order===row.last_unit_order) : null;
+    const unitLabel = unit ? `${unit.unit_order}단원 ${escapeHtml(unit.unit_name)}까지` : (row.last_unit_order ? `${row.last_unit_order}단원까지` : '');
+    const period = row.started_at ? `${fmtDate(row.started_at)} ~ ${fmtDate(row.ended_at)}` : `~ ${fmtDate(row.ended_at)}`;
+    return `
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13px;">
+        <div style="font-weight:600;">${row.slot_num}번 · ${escapeHtml(row.textbook_name)}</div>
+        <div class="sub" style="margin-top:4px;">${unitLabel}${unitLabel ? ' · ' : ''}${period}</div>
+      </div>`;
+  }).join('');
+}
+
 // 학생 상세보기 모달의 "교재 진도" 패널 렌더링
 async function renderStudentProgressPanel(studentId){
   const wrap = document.getElementById('detailProgressWrap');
@@ -1737,6 +1776,10 @@ async function renderStudentProgressPanel(studentId){
   detailProgressRows = (data && data.length) ? data
     : [{ slot_num:1, textbook_name:null, current_unit_order:null, last_completed_point:null, clinic_pending:false, unit_status:null, unit_started_at:null }];
   renderProgressRows(studentId);
+
+  // 학생을 바꿔서 다시 열었을 수 있으니, 이력 보기는 닫힌 상태로 초기화
+  document.getElementById('detailProgressHistoryWrap').style.display = 'none';
+  progressHistoryLoadedFor = null;
 }
 
 function renderProgressRows(studentId){
@@ -1768,6 +1811,7 @@ function progressRowHtml(studentId, row, textbookOptions, idPrefix){
           ${units.map(u=>`<option value="${u.unit_order}" ${u.unit_order===row.current_unit_order?'selected':''}>${u.unit_order}. ${escapeHtml(u.unit_name)}</option>`).join('')}
         </select>
         <button class="btn btn-primary btn-sm" onclick="saveStudentProgressSlot('${studentId}', ${row.slot_num}, '${idPrefix}')">저장</button>
+        <button class="btn btn-ghost btn-sm" style="color:#b3452e;" onclick="deleteProgressSlot('${studentId}', ${row.slot_num}, '${idPrefix}')">삭제</button>
       </div>
       <div class="sub" style="margin-top:8px;font-size:12.5px;color:var(--ink-soft);">
         최근 숙제 기록(자동): ${row.last_completed_point ? escapeHtml(row.last_completed_point)+'쪽' : '기록 없음'}${row.clinic_pending ? ' · <span style="color:#b3452e;">클리닉 필요</span>' : ''}${statusLabel}
@@ -1794,6 +1838,24 @@ function addProgressSlot(studentId){
   renderProgressRows(studentId);
 }
 
+// 슬롯의 교재가 바뀌기(또는 비워지기) 직전이면, 그 전 교재 기록을 student_progress_history에 남김.
+// "같은 교재 안에서 단원만 바뀐 경우"는 이력에 안 남김 — 교재 자체가 바뀔 때만 기록.
+async function archivePreviousTextbookIfChanged(studentId, slotNum, newTextbookName){
+  const { data: existing } = await sb.from('student_progress').select('*')
+    .eq('student_id', studentId).eq('slot_num', slotNum).maybeSingle();
+  if(!existing || !existing.textbook_name) return; // 이전에 지정된 교재가 없으면 남길 이력도 없음
+  if(existing.textbook_name === newTextbookName) return; // 같은 교재면 이력 남기지 않음
+
+  const { error } = await sb.from('student_progress_history').insert({
+    student_id: studentId,
+    slot_num: slotNum,
+    textbook_name: existing.textbook_name,
+    last_unit_order: existing.current_unit_order,
+    started_at: existing.unit_started_at
+  });
+  if(error) console.error('교재 이력 저장 실패:', error.message); // 이력 저장이 실패해도 새 교재 저장 자체는 막지 않음
+}
+
 // 슬롯 하나(교재명 + 현재 단원)를 student_progress에 저장
 // last_completed_point / recent_wrong_count / clinic_pending은 여기서 건드리지 않음
 // (숙제 빠른입력 쪽 자동 기록 로직과 분리되어 있어야 서로 덮어쓰지 않음)
@@ -1804,6 +1866,8 @@ async function saveStudentProgressSlot(studentId, slotNum, idPrefix){
   const unitSelect = document.getElementById(`${idPrefix}Unit_${studentId}_${slotNum}`);
   const textbookName = textbookSelect.value || null;
   const unitOrder = unitSelect.value ? parseInt(unitSelect.value, 10) : null;
+
+  await archivePreviousTextbookIfChanged(studentId, slotNum, textbookName);
 
   const { error } = await sb.from('student_progress').upsert({
     student_id: studentId,
@@ -1820,6 +1884,29 @@ async function saveStudentProgressSlot(studentId, slotNum, idPrefix){
   if(row){ row.textbook_name = textbookName; row.current_unit_order = unitOrder; row.unit_status = '진행중'; row.unit_started_at = todayStr(); }
   if(idPrefix === 'cur') renderCurriculumStudentBlock(studentId);
   alert(`${slotNum}번 교재 진도가 저장되었습니다.`);
+}
+
+// 슬롯 자체를 삭제. DB에 이미 저장된 슬롯이면 교재 기록을 이력에 남긴 뒤 삭제하고,
+// 아직 저장 전(화면에서 "+ 슬롯 추가"만 하고 저장 안 한) 슬롯이면 그냥 화면에서만 지움.
+async function deleteProgressSlot(studentId, slotNum, idPrefix){
+  idPrefix = idPrefix || 'prog';
+  if(!confirm(`${slotNum}번 교재 슬롯을 삭제할까요?`)) return;
+
+  const rows = idPrefix === 'cur' ? (curriculumProgressRows[studentId] || []) : detailProgressRows;
+
+  // archivePreviousTextbookIfChanged가 자체적으로 DB를 다시 조회해서 판단하므로,
+  // 로컬 캐시 상태와 무관하게 항상 호출해도 안전함 (저장할 이력이 없으면 그냥 조용히 끝남)
+  await archivePreviousTextbookIfChanged(studentId, slotNum, null);
+  const { error } = await sb.from('student_progress').delete()
+    .eq('student_id', studentId).eq('slot_num', slotNum);
+  if(error){ alert('삭제 실패: ' + error.message); return; }
+
+  const idx = rows.findIndex(r=>r.slot_num===slotNum);
+  if(idx > -1) rows.splice(idx, 1);
+  if(!rows.length) rows.push({ slot_num:1, textbook_name:null, current_unit_order:null, last_completed_point:null, clinic_pending:false, unit_status:null, unit_started_at:null });
+
+  if(idPrefix === 'cur') renderCurriculumStudentBlock(studentId);
+  else renderProgressRows(studentId);
 }
 
 // ── 사이드바 메뉴 순서 편집 (이 브라우저에만 저장, localStorage) ──────────────────
