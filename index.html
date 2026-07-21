@@ -4317,9 +4317,21 @@ function kioskShowResult(icon, text){
 }
 
 // 홈 화면에 앱처럼 설치할 수 있도록 서비스워커 등록 (지원 안 하는 브라우저는 조용히 무시)
+// + 앱을 열 때마다 새로 배포된 버전이 있는지 적극적으로 확인하고, 있으면 자동 새로고침
+// (예전엔 브라우저의 기본 백그라운드 확인 주기에만 의존해서, 배포해도 한참 지나야 반영되는 경우가 있었음)
 if('serviceWorker' in navigator){
-  window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  window.addEventListener('load', async ()=>{
+    try{
+      const registration = await navigator.serviceWorker.register('sw.js');
+      registration.update(); // 등록 직후 곧바로 새 버전 있는지 확인 (백그라운드 주기 기다리지 않음)
+
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+        if(reloaded) return; // 중복 새로고침 방지
+        reloaded = true;
+        location.reload();
+      });
+    }catch(e){ /* 서비스워커 등록 실패해도 앱은 정상 동작해야 하므로 조용히 무시 */ }
   });
 }
 </script>
