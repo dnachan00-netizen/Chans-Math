@@ -519,6 +519,7 @@
   <button class="tab-btn" data-tab="attendance"><span class="num">06</span>출결 관리</button>
   <button class="tab-btn" data-tab="students"><span class="num">07</span>학생 명단</button>
   <button class="tab-btn" data-tab="curriculum"><span class="num">08</span>교재</button>
+  <button class="tab-btn" data-tab="pushlog"><span class="num">09</span>발송 이력</button>
   <button id="sidebarOrderEditBtn" onclick="openTabOrderEditor()" style="margin-top:10px;padding:10px 24px;background:transparent;border:none;border-top:1px solid rgba(255,255,255,0.08);color:#9a9cb0;font-size:12.5px;cursor:pointer;text-align:left;font-family:var(--sans);">≡ 메뉴 순서 편집</button>
 </nav>
 
@@ -574,6 +575,29 @@
     </div>
     <div class="panel" id="curriculumStudentsPanel" style="display:none;">
       <div id="curriculumStudents"></div>
+    </div>
+  </section>
+
+  <section id="tab-pushlog" class="tab-panel" style="display:none;">
+    <div class="panel">
+      <h2 style="margin:0 0 6px;">발송 이력</h2>
+      <p class="desc">공지사항·수업 리포트·숙제 등록·이벤트 알림이 언제, 누구에게, 성공/실패했는지 확인할 수 있습니다 (카카오 알림톡이 아닌 웹 푸시 기준).</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+        <select id="pushLogKindFilter" onchange="renderPushLogTab()">
+          <option value="">전체 종류</option>
+          <option value="announcement">공지사항</option>
+          <option value="guardian_report">수업 리포트</option>
+          <option value="homework">숙제 등록</option>
+          <option value="event">이벤트</option>
+        </select>
+        <select id="pushLogStatusFilter" onchange="renderPushLogTab()">
+          <option value="">전체 상태</option>
+          <option value="success">성공만</option>
+          <option value="fail">실패만</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="renderPushLogTab()">새로고침</button>
+      </div>
+      <div id="pushLogWrap">불러오는 중...</div>
     </div>
   </section>
 
@@ -1323,6 +1347,7 @@ document.querySelectorAll('#staffView .tab-btn').forEach(btn=>{
     if(btn.dataset.tab==='classlog') renderClassLogTab();
     if(btn.dataset.tab==='announcements') renderAnnouncementsTab();
     if(btn.dataset.tab==='curriculum') renderCurriculumTab();
+    if(btn.dataset.tab==='pushlog') renderPushLogTab();
   });
 });
 
@@ -1726,6 +1751,64 @@ async function addTitleOnlyTextbook(){
   input.value = '';
   if(curriculumTabSelectedClass !== null) await renderCurriculumStudentList();
   alert(`"${title}" 교재가 등록되었습니다. 학생 배정 드롭다운에서 바로 선택하실 수 있어요.`);
+}
+
+// ── 발송 이력 탭 ──────────────────────────────────────────
+const PUSH_LOG_KIND_LABEL = {
+  announcement: '📢 공지사항',
+  guardian_report: '📄 수업 리포트',
+  homework: '📝 숙제 등록',
+  event: '🔔 이벤트'
+};
+
+async function renderPushLogTab(){
+  const wrap = document.getElementById('pushLogWrap');
+  wrap.innerHTML = '불러오는 중...';
+
+  const kindFilter = document.getElementById('pushLogKindFilter').value;
+  const statusFilter = document.getElementById('pushLogStatusFilter').value;
+
+  let query = sb.from('push_log').select('*').order('sent_at', { ascending: false }).limit(300);
+  if(kindFilter) query = query.eq('kind', kindFilter);
+  if(statusFilter === 'success') query = query.eq('success', true);
+  if(statusFilter === 'fail') query = query.eq('success', false);
+
+  const { data, error } = await query;
+  if(error){ wrap.innerHTML = `<div class="empty">불러오기 실패: ${escapeHtml(error.message)}</div>`; return; }
+  if(!data || !data.length){ wrap.innerHTML = `<div class="empty">발송 기록이 없습니다.</div>`; return; }
+
+  const successCount = data.filter(r=>r.success).length;
+  const failCount = data.length - successCount;
+
+  let html = `<p class="sub" style="margin-bottom:10px;">최근 ${data.length}건 · 성공 ${successCount} · 실패 ${failCount}</p>`;
+  html += `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr style="text-align:left;border-bottom:1px solid var(--line);">
+      <th style="padding:6px 8px;">시각</th>
+      <th style="padding:6px 8px;">종류</th>
+      <th style="padding:6px 8px;">대상</th>
+      <th style="padding:6px 8px;">제목/내용</th>
+      <th style="padding:6px 8px;">결과</th>
+    </tr></thead><tbody>`;
+
+  html += data.map(row=>{
+    const student = row.student_id ? findStudent(row.student_id) : null;
+    const targetLabel = student ? escapeHtml(student.name)
+      : (row.recipient_type === 'guardian' ? '학부모(전체/반 공지)' : '알 수 없음');
+    const sentAtLabel = new Date(row.sent_at).toLocaleString('ko-KR', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+    const resultLabel = row.success
+      ? `<span style="color:#3a7a4a;">성공</span>`
+      : `<span style="color:#b3452e;" title="${escapeHtml(row.error_message||'')}">실패</span>`;
+    return `<tr style="border-bottom:1px solid var(--line);">
+      <td style="padding:6px 8px;white-space:nowrap;color:var(--ink-soft);">${sentAtLabel}</td>
+      <td style="padding:6px 8px;white-space:nowrap;">${PUSH_LOG_KIND_LABEL[row.kind] || row.kind}</td>
+      <td style="padding:6px 8px;white-space:nowrap;">${targetLabel}</td>
+      <td style="padding:6px 8px;">${escapeHtml(row.title || '')}${row.body ? ' · ' + escapeHtml((row.body||'').slice(0,40)) : ''}</td>
+      <td style="padding:6px 8px;white-space:nowrap;">${resultLabel}</td>
+    </tr>`;
+  }).join('');
+
+  html += `</tbody></table>`;
+  wrap.innerHTML = html;
 }
 
 // "지난 교재 보기" 토글 — 처음 열 때만 조회하고, 이후엔 열고 닫기만 함
