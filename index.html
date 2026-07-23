@@ -774,6 +774,10 @@
           <option value="pending">진행중(미완료)</option>
           <option value="done">전원 제출완료</option>
         </select>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--ink-soft);white-space:nowrap;">
+          <input type="checkbox" id="hwShowStale"> 마감 30일 지난 미완료도 보기
+        </label>
+        <button class="btn btn-warn btn-sm" onclick="bulkDeleteStaleHomework()">마감 30일 지난 미완료 일괄 정리</button>
       </div>
       <div id="hwListWrap"></div>
     </div>
@@ -956,6 +960,12 @@
         <button class="btn btn-ghost btn-sm" onclick="toggleProgressHistory(editingStudentId)">지난 교재 보기</button>
         <div id="detailProgressHistoryWrap" style="display:none;margin-top:10px;"></div>
       </div>
+    </div>
+    <div class="chart-panel">
+      <h3>숙제 완료율 (월별)</h3>
+      <p class="sub" style="margin-top:-4px;margin-bottom:12px;">"오래된 미완료 숙제 정리"를 돌릴 때마다, 그 시점까지의 학생별 월간 완료율이 여기 누적됩니다. 최근 미정리 숙제는 반영 전이라 위 숙제 목록과 다를 수 있습니다.</p>
+      <button class="btn btn-ghost btn-sm" onclick="toggleHomeworkCompletionHistory(editingStudentId)">완료율 보기</button>
+      <div id="detailHwCompletionWrap" style="display:none;margin-top:10px;"></div>
     </div>
   </div>
 </div>
@@ -1846,6 +1856,37 @@ async function renderProgressHistory(studentId){
   }).join('');
 }
 
+// "완료율 보기" 토글 — 처음 열 때만 조회
+let hwCompletionLoadedFor = null;
+async function toggleHomeworkCompletionHistory(studentId){
+  const box = document.getElementById('detailHwCompletionWrap');
+  const isOpen = box.style.display !== 'none';
+  if(isOpen){ box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  if(hwCompletionLoadedFor === studentId) return;
+  await renderHomeworkCompletionHistory(studentId);
+  hwCompletionLoadedFor = studentId;
+}
+
+async function renderHomeworkCompletionHistory(studentId){
+  const box = document.getElementById('detailHwCompletionWrap');
+  box.innerHTML = '불러오는 중...';
+
+  const { data, error } = await sb.from('homework_completion_summary').select('*')
+    .eq('student_id', studentId).order('period', { ascending: false });
+  if(error){ box.innerHTML = `<div class="empty">불러오기 실패: ${escapeHtml(error.message)}</div>`; return; }
+  if(!data || !data.length){ box.innerHTML = `<div class="empty">아직 집계된 완료율이 없습니다 (정리 버튼을 한 번도 안 돌렸거나, 정리할 오래된 숙제가 아직 없는 경우입니다).</div>`; return; }
+
+  box.innerHTML = data.map(row=>{
+    const rate = row.total_count > 0 ? Math.round(row.completed_count / row.total_count * 100) : 0;
+    return `
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13px;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-weight:600;">${row.period}</span>
+        <span>${row.completed_count}/${row.total_count}건 · <strong style="color:${rate>=80?'#3a7a4a':rate>=50?'#b3862e':'#b3452e'};">${rate}%</strong></span>
+      </div>`;
+  }).join('');
+}
+
 // 학생 상세보기 모달의 "교재 진도" 패널 렌더링
 async function renderStudentProgressPanel(studentId){
   const wrap = document.getElementById('detailProgressWrap');
@@ -1863,6 +1904,8 @@ async function renderStudentProgressPanel(studentId){
   // 학생을 바꿔서 다시 열었을 수 있으니, 이력 보기는 닫힌 상태로 초기화
   document.getElementById('detailProgressHistoryWrap').style.display = 'none';
   progressHistoryLoadedFor = null;
+  document.getElementById('detailHwCompletionWrap').style.display = 'none';
+  hwCompletionLoadedFor = null;
 }
 
 function renderProgressRows(studentId){
@@ -3454,6 +3497,7 @@ function goToUrgentHomework(){
 document.getElementById('hwFilterStudent').addEventListener('change', renderHwList);
 document.getElementById('hwFilterKeyword').addEventListener('input', renderHwList);
 document.getElementById('hwFilterStatus').addEventListener('change', renderHwList);
+document.getElementById('hwShowStale').addEventListener('change', renderHwList);
 
 let hwBookRows = [{idx:1, num:1, range:''}];
 let hwBookRowSeq = 2;
@@ -3590,6 +3634,61 @@ async function deleteAssignment(id){
   renderHwList();
 }
 
+// 마감 30일 지난 미완료 숙제를 한 번에 정리 (제출된 내용도 함께 삭제됨 — 복구 불가)
+// 삭제 대상 숙제들을 학생별·월별(마감일 기준)로 집계해서 homework_completion_summary에 누적 저장.
+// 기존에 그 학생·그 달 집계가 이미 있으면(예전에도 정리를 돌린 적 있으면) 더해서 누적함.
+async function archiveHomeworkCompletionBeforeDelete(staleList){
+  const buckets = {}; // `${studentId}|${period}` -> { studentId, period, total, completed }
+
+  staleList.forEach(hw=>{
+    const period = hw.due_date.slice(0, 7); // 'YYYY-MM'
+    const targets = hwTargetStudents(hw);
+    const subForThis = submissions.filter(sub=>sub.assignment_id===hw.id);
+    targets.forEach(s=>{
+      const key = `${s.id}|${period}`;
+      if(!buckets[key]) buckets[key] = { studentId: s.id, period, total: 0, completed: 0 };
+      buckets[key].total++;
+      const sub = subForThis.find(x=>x.student_id===s.id);
+      if(sub && sub.submitted_at) buckets[key].completed++;
+    });
+  });
+
+  const entries = Object.values(buckets);
+  if(!entries.length) return;
+
+  for(const entry of entries){
+    const { data: existing } = await sb.from('homework_completion_summary').select('*')
+      .eq('student_id', entry.studentId).eq('period', entry.period).maybeSingle();
+
+    const total = (existing ? existing.total_count : 0) + entry.total;
+    const completed = (existing ? existing.completed_count : 0) + entry.completed;
+
+    const { error } = await sb.from('homework_completion_summary').upsert({
+      student_id: entry.studentId,
+      period: entry.period,
+      total_count: total,
+      completed_count: completed,
+      updated_at: todayStr()
+    }, { onConflict: 'student_id,period' });
+    if(error) console.error('숙제 완료율 집계 저장 실패:', error.message); // 집계 실패해도 정리 자체는 계속 진행
+  }
+}
+
+async function bulkDeleteStaleHomework(){
+  const staleList = assignments.filter(isHomeworkStale);
+  if(!staleList.length){ alert(`마감 ${HW_STALE_DAYS}일 지난 미완료 숙제가 없습니다.`); return; }
+  if(!confirm(`마감 ${HW_STALE_DAYS}일 지난 미완료 숙제 ${staleList.length}건을 삭제할까요?\n삭제 전에 학생별 월간 완료율은 자동으로 집계해서 남겨둡니다.\n제출된 원본 내용은 함께 지워지고, 되돌릴 수 없습니다.`)) return;
+
+  await archiveHomeworkCompletionBeforeDelete(staleList);
+
+  const { error } = await sb.from('assignments').delete().in('id', staleList.map(hw=>hw.id));
+  if(error){ alert('일괄 삭제 실패: ' + error.message); return; }
+
+  await loadAssignmentsAndSubmissions();
+  renderHwList();
+  alert(`${staleList.length}건 정리했습니다. 학생별 월간 완료율은 누적 저장됐습니다.`);
+}
+
 function populateHwFilterStudent(){
   const sel = document.getElementById('hwFilterStudent');
   const prevVal = sel.value;
@@ -3613,6 +3712,23 @@ function hwMatchesStudentFilter(hw, studentId){
   return false;
 }
 
+const HW_STALE_DAYS = 30; // 마감 후 이 기간(일)이 지난 미완료 숙제는 기본 목록에서 숨김
+
+function isHomeworkDone(hw){
+  const targets = hwTargetStudents(hw);
+  const subForThis = submissions.filter(sub=>sub.assignment_id===hw.id);
+  const doneCount = subForThis.filter(sub=>sub.submitted_at).length;
+  return targets.length>0 && doneCount===targets.length;
+}
+
+// "미완료인 채로 계속 쌓이는" 문제의 대상 — 완료됐거나 마감일이 없는 숙제는 대상 아님
+function isHomeworkStale(hw){
+  if(isHomeworkDone(hw)) return false;
+  if(!hw.due_date) return false;
+  const diffDays = (Date.now() - new Date(hw.due_date).getTime()) / 86400000;
+  return diffDays > HW_STALE_DAYS;
+}
+
 function renderHwList(){
   populateHwFilterStudent();
   const wrap = document.getElementById('hwListWrap');
@@ -3622,6 +3738,7 @@ function renderHwList(){
   const filterStudent = document.getElementById('hwFilterStudent').value;
   const filterKeyword = document.getElementById('hwFilterKeyword').value.trim().toLowerCase();
   const filterStatus = document.getElementById('hwFilterStatus').value;
+  const showStale = document.getElementById('hwShowStale').checked;
 
   let filtered = assignments.filter(hw=>{
     if(!hwMatchesStudentFilter(hw, filterStudent)) return false;
@@ -3632,14 +3749,12 @@ function renderHwList(){
     return true;
   });
 
+  if(!showStale){
+    filtered = filtered.filter(hw=>!isHomeworkStale(hw));
+  }
+
   if(filterStatus){
-    filtered = filtered.filter(hw=>{
-      const targets = hwTargetStudents(hw);
-      const subForThis = submissions.filter(sub=>sub.assignment_id===hw.id);
-      const doneCount = subForThis.filter(sub=>sub.submitted_at).length;
-      const isDone = targets.length>0 && doneCount===targets.length;
-      return filterStatus==='done' ? isDone : !isDone;
-    });
+    filtered = filtered.filter(hw=> filterStatus==='done' ? isHomeworkDone(hw) : !isHomeworkDone(hw));
   }
 
   if(filtered.length===0){ wrap.innerHTML = `<div class="empty">조건에 맞는 숙제가 없습니다.</div>`; return; }
