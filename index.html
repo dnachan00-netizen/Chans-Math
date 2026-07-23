@@ -775,9 +775,12 @@
           <option value="done">전원 제출완료</option>
         </select>
         <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--ink-soft);white-space:nowrap;">
-          <input type="checkbox" id="hwShowStale"> 마감 30일 지난 미완료도 보기
+          마감 <input type="number" id="hwStaleDays" min="1" style="width:56px;"> 일 지나면 정리 대상
         </label>
-        <button class="btn btn-warn btn-sm" onclick="bulkDeleteStaleHomework()">마감 30일 지난 미완료 일괄 정리</button>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--ink-soft);white-space:nowrap;">
+          <input type="checkbox" id="hwShowStale"> 그 기간 지난 미완료도 보기
+        </label>
+        <button class="btn btn-warn btn-sm" onclick="bulkDeleteStaleHomework()">오래된 미완료 일괄 정리</button>
       </div>
       <div id="hwListWrap"></div>
     </div>
@@ -1283,6 +1286,7 @@ async function enterApp(session){
     document.getElementById('whoLabel').textContent = session.user.email;
     applySidebarOrder();
     populateClassTimeSelects();
+    initHwStaleDaysInput();
     await refreshAll();
     await loadAssignmentsAndSubmissions();
     renderHwList();
@@ -3498,6 +3502,11 @@ document.getElementById('hwFilterStudent').addEventListener('change', renderHwLi
 document.getElementById('hwFilterKeyword').addEventListener('input', renderHwList);
 document.getElementById('hwFilterStatus').addEventListener('change', renderHwList);
 document.getElementById('hwShowStale').addEventListener('change', renderHwList);
+document.getElementById('hwStaleDays').addEventListener('change', ()=>{
+  const val = getHwStaleDaysThreshold();
+  try { localStorage.setItem('hwStaleDays', String(val)); } catch(e){}
+  renderHwList();
+});
 
 let hwBookRows = [{idx:1, num:1, range:''}];
 let hwBookRowSeq = 2;
@@ -3675,9 +3684,10 @@ async function archiveHomeworkCompletionBeforeDelete(staleList){
 }
 
 async function bulkDeleteStaleHomework(){
+  const days = getHwStaleDaysThreshold();
   const staleList = assignments.filter(isHomeworkStale);
-  if(!staleList.length){ alert(`마감 ${HW_STALE_DAYS}일 지난 미완료 숙제가 없습니다.`); return; }
-  if(!confirm(`마감 ${HW_STALE_DAYS}일 지난 미완료 숙제 ${staleList.length}건을 삭제할까요?\n삭제 전에 학생별 월간 완료율은 자동으로 집계해서 남겨둡니다.\n제출된 원본 내용은 함께 지워지고, 되돌릴 수 없습니다.`)) return;
+  if(!staleList.length){ alert(`마감 ${days}일 지난 미완료 숙제가 없습니다.`); return; }
+  if(!confirm(`마감 ${days}일 지난 미완료 숙제 ${staleList.length}건을 삭제할까요?\n삭제 전에 학생별 월간 완료율은 자동으로 집계해서 남겨둡니다.\n제출된 원본 내용은 함께 지워지고, 되돌릴 수 없습니다.`)) return;
 
   await archiveHomeworkCompletionBeforeDelete(staleList);
 
@@ -3712,7 +3722,22 @@ function hwMatchesStudentFilter(hw, studentId){
   return false;
 }
 
-const HW_STALE_DAYS = 30; // 마감 후 이 기간(일)이 지난 미완료 숙제는 기본 목록에서 숨김
+const HW_STALE_DAYS_DEFAULT = 30; // 원장님이 화면에서 값을 바꾸기 전까지 쓰이는 기본값
+
+// 화면의 "마감 N일 지나면 정리 대상" 입력값을 읽음 (이 브라우저에 localStorage로 기억해둠)
+function getHwStaleDaysThreshold(){
+  const input = document.getElementById('hwStaleDays');
+  const val = input ? parseInt(input.value, 10) : NaN;
+  return (!isNaN(val) && val > 0) ? val : HW_STALE_DAYS_DEFAULT;
+}
+
+function initHwStaleDaysInput(){
+  const input = document.getElementById('hwStaleDays');
+  if(!input) return;
+  let saved = null;
+  try { saved = parseInt(localStorage.getItem('hwStaleDays'), 10); } catch(e){}
+  input.value = (saved && saved > 0) ? saved : HW_STALE_DAYS_DEFAULT;
+}
 
 function isHomeworkDone(hw){
   const targets = hwTargetStudents(hw);
@@ -3726,7 +3751,7 @@ function isHomeworkStale(hw){
   if(isHomeworkDone(hw)) return false;
   if(!hw.due_date) return false;
   const diffDays = (Date.now() - new Date(hw.due_date).getTime()) / 86400000;
-  return diffDays > HW_STALE_DAYS;
+  return diffDays > getHwStaleDaysThreshold();
 }
 
 function renderHwList(){
