@@ -408,6 +408,10 @@
   .status-badge.st-out{background:var(--warn-soft);color:var(--warn);}
   .status-badge.st-hold{background:#e3e1da;color:var(--ink-soft);}
   .status-badge.st-pending{background:#fdf0d5;color:#9a6a15;}
+  .status-badge.st-report-off{background:var(--warn-soft);color:var(--warn);margin-left:6px;}
+  .report-off-summary{background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13.5px;color:var(--warn);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .report-off-summary strong{font-weight:800;}
+  .report-off-summary .names{color:var(--ink);font-weight:600;}
   .cl-prev-rate{background:#fcfcfb;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13.5px;color:var(--ink-soft);}
   footer{text-align:center;padding:20px;color:var(--ink-soft);font-size:12px;font-family:var(--mono);}
   #loginScreen{position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;z-index:999;}
@@ -661,6 +665,7 @@
           <input type="text" id="studentSearch" placeholder="이름으로 검색" style="max-width:220px;">
         </div>
       </div>
+      <div id="reportOffSummary"></div>
       <div id="studentTableWrap"></div>
     </div>
   </section>
@@ -1565,6 +1570,17 @@ function renderStudentTable(){
       return (a.name||'').localeCompare(b.name||'', 'ko');
     });
   document.getElementById('studentCount').textContent = students.length;
+
+  // 재원 중인데 일일 리포트 발송이 꺼져있는 학생 요약
+  const reportOffList = students.filter(s => (s.enrollment_status || '재원') === '재원' && s.send_daily_report === false);
+  const summaryEl = document.getElementById('reportOffSummary');
+  if(reportOffList.length === 0){
+    summaryEl.innerHTML = '';
+  } else {
+    const names = reportOffList.map(s => `<span class="names" style="cursor:pointer;text-decoration:underline;" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</span>`).join(', ');
+    summaryEl.innerHTML = `<div class="report-off-summary">⚠️ <strong>일일 리포트 발송 꺼진 학생 ${reportOffList.length}명</strong>: ${names}</div>`;
+  }
+
   const wrap = document.getElementById('studentTableWrap');
   if(students.length===0){ wrap.innerHTML = `<div class="empty">등록된 학생이 없습니다. 위 양식으로 첫 학생을 등록해 보세요.</div>`; return; }
   if(list.length===0){ wrap.innerHTML = `<div class="empty">조건에 해당하는 학생이 없습니다.</div>`; return; }
@@ -1577,7 +1593,7 @@ function renderStudentTable(){
     const avg = scoreList.length ? Math.round(scoreList.reduce((a,b)=>a+Number(b.score),0)/scoreList.length) : null;
     const status = s.enrollment_status || '재원';
     html += `<tr>
-      <td><strong>${escapeHtml(s.name)}</strong></td>
+      <td><strong>${escapeHtml(s.name)}</strong>${s.send_daily_report === false ? `<span class="status-badge st-report-off">리포트 OFF</span>` : ''}</td>
       <td><span class="status-badge ${statusBadgeClass(status)}">${escapeHtml(status)}</span></td>
       <td>${escapeHtml(s.grade)}</td>
       <td>${escapeHtml(s.class_time)||'-'}</td>
@@ -1612,7 +1628,8 @@ let detailCalDate = new Date();
 function openStudentDetail(id){
   const s = findStudent(id); if(!s) return;
 
-  document.getElementById('detailStuName').textContent = s.name;
+  document.getElementById('detailStuName').innerHTML =
+    `${escapeHtml(s.name)}${s.send_daily_report === false ? `<span class="status-badge st-report-off">리포트 OFF</span>` : ''}`;
   document.getElementById('detailStuMeta').textContent =
     `${s.enrollment_status || '재원'} · ${s.grade || ''} · ${s.school || '학교 미입력'} · ${s.class_time || '반 미배정'}${s.guardian_phone ? ' · 보호자 '+s.guardian_phone : ''}`;
 
